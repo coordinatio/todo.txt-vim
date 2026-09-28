@@ -852,4 +852,236 @@ fun! todo#Complete(findstart, base)
     endif
 endfun
 
+" Highlight {{{1
+"
+" Role colors follow the active colorscheme. g:Todo_txt_highlight overrides
+" individual roles; everything else is applied with "default" so a colorscheme
+" can define the same groups itself.
+
+let s:owned_groups = {}
+
+function! todo#ResetHighlightOwnership() abort
+    let s:owned_groups = {}
+endfunction
+
+function! todo#ApplyHighlight() abort
+    if !exists('s:todo_txt_hl_aucmd')
+        augroup TodoTxtHighlight
+            autocmd!
+            autocmd ColorSchemePre * call todo#ResetHighlightOwnership()
+            autocmd ColorScheme * call todo#ApplyHighlight()
+        augroup END
+        let s:todo_txt_hl_aucmd = 1
+    endif
+
+    let l:cfg = get(g:, 'Todo_txt_highlight', {})
+    if type(l:cfg) != type({})
+        echohl ErrorMsg
+        echomsg 'Todo.txt: g:Todo_txt_highlight must be a Dictionary'
+        echohl None
+        let l:cfg = {}
+    endif
+    let l:inbox_italic = get(l:cfg, 'InboxItalic', 1)
+    let l:roles = {
+                \ 'A': ['TodoPriorityA'],
+                \ 'AMark': ['TodoPriorityAMark'],
+                \ 'B': ['TodoPriorityB'],
+                \ 'Done': ['TodoDone'],
+                \ 'Inbox': ['TodoInbox'],
+                \ 'Other': s:OtherPriorityGroups(),
+                \ }
+    " Identifier is the default foreground in github_light, so (B) would match
+    " inbox text. Function is a separate hue there (and in most schemes).
+    let l:defaults = {
+                \ 'A': 'Constant',
+                \ 'AMark': 'Todo',
+                \ 'B': 'Function',
+                \ 'Other': 'Type',
+                \ 'Inbox': 'Underlined',
+                \ 'Done': 'Comment',
+                \ }
+
+    for l:role in keys(l:defaults)
+        let l:forced = has_key(l:cfg, l:role)
+        let l:spec = l:forced ? l:cfg[l:role] : l:defaults[l:role]
+        let l:italic = l:role ==# 'Inbox' && l:inbox_italic
+        for l:group in l:roles[l:role]
+            call s:ApplyHighlightSpec(l:group, l:spec, l:forced, l:italic, l:role)
+        endfor
+    endfor
+
+    for [l:group, l:target] in [
+                \ ['TodoKey', 'Special'],
+                \ ['TodoDate', 'PreProc'],
+                \ ['TodoProject', 'Special'],
+                \ ['TodoContext', 'Special'],
+                \ ['TodoDueToday', 'Todo'],
+                \ ['TodoOverDueDate', 'Error'],
+                \ ['TodoThresholdDate', 'Comment'],
+                \ ]
+        execute 'highlight default link ' . l:group . ' ' . l:target
+    endfor
+endfunction
+
+function! s:OtherPriorityGroups() abort
+    if !exists('s:todo_other_groups')
+        let s:todo_other_groups = []
+        for l:code in range(char2nr('C'), char2nr('Z'))
+            call add(s:todo_other_groups, 'TodoPriority' . nr2char(l:code))
+        endfor
+    endif
+    return s:todo_other_groups
+endfunction
+
+function! s:ApplyHighlightSpec(group, spec, forced, italic, role) abort
+    if type(a:spec) == type('')
+        call s:ApplyLink(a:group, a:spec, a:forced, a:italic)
+    elseif type(a:spec) == type({})
+        call s:ApplyAttrs(a:group, a:spec, a:forced, a:italic)
+    else
+        echohl ErrorMsg
+        echomsg 'Todo.txt: g:Todo_txt_highlight.' . a:role . ' must be a group name or a Dictionary'
+        echohl None
+    endif
+endfunction
+
+function! s:SkipHighlight(group, forced) abort
+    return !a:forced && s:HighlightDefined(a:group) && !get(s:owned_groups, a:group, 0)
+endfunction
+
+function! s:ApplyLink(group, target, forced, italic) abort
+    if s:SkipHighlight(a:group, a:forced)
+        return
+    endif
+    if a:italic
+        call s:CopyHighlight(a:group, a:target, 1)
+    elseif a:forced || get(s:owned_groups, a:group, 0)
+        " highlight! link keeps previous attributes in Neovim.
+        call s:ForceLink(a:group, a:target)
+    else
+        execute 'highlight default link ' . a:group . ' ' . a:target
+    endif
+    let s:owned_groups[a:group] = 1
+endfunction
+
+function! s:ForceLink(group, target) abort
+    execute 'highlight clear ' . a:group
+    execute 'highlight link ' . a:group . ' ' . a:target
+endfunction
+
+function! s:ApplyAttrs(group, spec, forced, italic) abort
+    if s:SkipHighlight(a:group, a:forced)
+        return
+    endif
+    let l:parts = ['highlight', a:group]
+    for l:key in ['term', 'ctermfg', 'ctermbg', 'guifg', 'guibg', 'guisp']
+        if has_key(a:spec, l:key)
+            call add(l:parts, l:key . '=' . s:HlArg(a:spec[l:key]))
+        endif
+    endfor
+    let l:gui = has_key(a:spec, 'gui') ? s:HlArg(a:spec.gui) : ''
+    let l:cterm = has_key(a:spec, 'cterm') ? s:HlArg(a:spec.cterm) : ''
+    if a:italic && !has_key(a:spec, 'gui') && !has_key(a:spec, 'cterm')
+        let l:gui = s:AddAttr(l:gui, 'italic')
+        let l:cterm = s:AddAttr(l:cterm, 'italic')
+    endif
+    if l:gui !=# ''
+        call add(l:parts, 'gui=' . l:gui)
+    endif
+    if l:cterm !=# ''
+        call add(l:parts, 'cterm=' . l:cterm)
+    endif
+    if len(l:parts) > 2
+        execute 'highlight clear ' . a:group
+        execute join(l:parts, ' ')
+        let s:owned_groups[a:group] = 1
+    endif
+endfunction
+
+function! s:CopyHighlight(group, target, italic) abort
+    let l:id = synIDtrans(hlID(a:target))
+    if l:id == 0
+        call s:ForceLink(a:group, a:target)
+        return
+    endif
+    execute 'highlight clear ' . a:group
+    let l:parts = ['highlight', a:group]
+    let l:guifg = synIDattr(l:id, 'fg', 'gui')
+    let l:guibg = synIDattr(l:id, 'bg', 'gui')
+    let l:guisp = synIDattr(l:id, 'sp', 'gui')
+    let l:ctermfg = synIDattr(l:id, 'fg', 'cterm')
+    let l:ctermbg = synIDattr(l:id, 'bg', 'cterm')
+    if l:guifg !=# ''
+        call add(l:parts, 'guifg=' . l:guifg)
+    endif
+    if l:guibg !=# ''
+        call add(l:parts, 'guibg=' . l:guibg)
+    endif
+    if l:guisp !=# ''
+        call add(l:parts, 'guisp=' . l:guisp)
+    endif
+    if l:ctermfg !=# ''
+        call add(l:parts, 'ctermfg=' . l:ctermfg)
+    endif
+    if l:ctermbg !=# ''
+        call add(l:parts, 'ctermbg=' . l:ctermbg)
+    endif
+    let l:gui = s:AttrString(l:id, 'gui')
+    let l:cterm = s:AttrString(l:id, 'cterm')
+    let l:term = s:AttrString(l:id, 'term')
+    if a:italic
+        let l:gui = s:AddAttr(l:gui, 'italic')
+        let l:cterm = s:AddAttr(l:cterm, 'italic')
+    endif
+    if l:term !=# ''
+        call add(l:parts, 'term=' . l:term)
+    endif
+    if l:gui !=# ''
+        call add(l:parts, 'gui=' . l:gui)
+    endif
+    if l:cterm !=# ''
+        call add(l:parts, 'cterm=' . l:cterm)
+    endif
+    if len(l:parts) == 2
+        call s:ForceLink(a:group, a:target)
+        return
+    endif
+    execute join(l:parts, ' ')
+endfunction
+
+function! s:AttrString(id, mode) abort
+    let l:names = ['bold', 'underline', 'undercurl', 'reverse', 'inverse', 'italic', 'standout']
+    let l:on = []
+    for l:name in l:names
+        if synIDattr(a:id, l:name, a:mode) ==# '1'
+            call add(l:on, l:name)
+        endif
+    endfor
+    return join(l:on, ',')
+endfunction
+
+function! s:AddAttr(attrs, name) abort
+    if a:attrs ==# '' || a:attrs ==# 'NONE'
+        return a:name
+    endif
+    if a:attrs =~# '\<' . a:name . '\>'
+        return a:attrs
+    endif
+    return a:attrs . ',' . a:name
+endfunction
+
+function! s:HlArg(val) abort
+    return type(a:val) == type(0) ? string(a:val) : a:val
+endfunction
+
+function! s:HighlightDefined(group) abort
+    redir => l:out
+    silent! execute 'highlight ' . a:group
+    redir END
+    if l:out =~# 'not found' || l:out =~# 'No highlight groups' || l:out =~# 'xxx cleared'
+        return 0
+    endif
+    return l:out =~# 'xxx'
+endfunction
+
 " vim: tabstop=4 shiftwidth=4 softtabstop=4 expandtab foldmethod=marker

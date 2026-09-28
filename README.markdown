@@ -28,6 +28,7 @@
     2. [Priorities](#priorities)
     3. [Dates](#dates)
     4. [Done](#done)
+8. [Highlighting](#highlighting)
 
 ## Release notes
 
@@ -334,6 +335,28 @@ disable this behavior by setting the following global variable:
 ### Format
 
 + `<LocalLeader>ff` : Try to fix todo.txt format
+
+## Highlighting
+
+Lines are colored by role, using highlight groups from the active colorscheme:
+
++ `(A)` is the watch list: work already started that you keep an eye on. Only the `(A)` mark uses `Todo` (the bright flag). The rest of the line uses `Constant`.
++ `(B)` is the list of next actions, drawn with `Function`.
++ `(C)`–`(Z)` are formulated tasks outside those two lists, drawn with `Type`.
++ A line with no priority is an inbox item: not a task yet. It uses `Underlined` and italics.
++ A completed line (`x ...`) uses `Comment` for the whole line, so projects, contexts and dates fade with it.
+
+Priorities are recognized after an optional creation date (`2017-09-01 (A) ...`).
+
+Override colors with `g:Todo_txt_highlight`. A value is a highlight group name or a dictionary of attributes (`guifg`, `guibg`, `ctermfg`, `ctermbg`, `gui`, `cterm`). Keys you omit keep the default. `InboxItalic` (default 1) adds italics on top of the inbox color.
+
+```vim
+let g:Todo_txt_highlight = {
+  \ 'AMark': {'guifg': '#ffcc00', 'ctermfg': '220', 'gui': 'bold', 'cterm': 'bold'},
+  \ }
+```
+
+A colorscheme can define `TodoPriorityA` and the other `Todo*` groups itself. Those definitions stay unless the same key is set in `g:Todo_txt_highlight`.
 
 ## Fold
 

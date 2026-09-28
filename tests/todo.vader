@@ -24,16 +24,16 @@ Execute (Syntax for done task):
   AssertEqual 'TodoDone',         SyntaxAt( 3,  1)
   AssertEqual 'TodoDone',         SyntaxAt( 3,  4)
   AssertEqual 'TodoDone',         SyntaxAt( 3,  7)
-  AssertEqual 'TodoKey',          SyntaxAt( 3, 13)
-  AssertEqual 'TodoKey',          SyntaxAt( 3, 28)
-  AssertEqual 'TodoKey',          SyntaxAt( 3, 72)
-  AssertEqual 'TodoDate',         SyntaxAt( 3, 17)
-  AssertEqual 'TodoDate',         SyntaxAt( 3, 32)
-  AssertEqual 'TodoDate',         SyntaxAt( 3, 43)
-  AssertEqual 'TodoProject',      SyntaxAt( 3, 54)
-  AssertEqual 'TodoContext',      SyntaxAt( 3, 63)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 13)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 28)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 72)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 17)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 32)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 43)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 54)
+  AssertEqual 'TodoDone',         SyntaxAt( 3, 63)
 Execute (Syntax for active task):
-  AssertEqual '',                 SyntaxAt( 4,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 4,  1)
   AssertEqual 'TodoOverDueDate',  SyntaxAt( 4, 13)
   AssertEqual 'TodoKey',          SyntaxAt( 4, 28)
   AssertEqual 'TodoKey',          SyntaxAt( 4, 72)
@@ -74,7 +74,7 @@ x 345678901234567890123456789012345678901234567890123456789012345678901234567890
 x 345678901234567890123456789012345678901234567890123456789012345678901234567890  L29
 x   .    1    .    2    .    3    .    4    .    5    .    6    .    7    .    8  L30
 Execute (Syntax for priority task):
-  AssertEqual 'TodoPriorityA',    SyntaxAt( 3,  2)
+  AssertEqual 'TodoPriorityAMark', SyntaxAt( 3,  2)
   AssertEqual 'TodoPriorityA',    SyntaxAt( 3,  5)
   AssertEqual 'TodoPriorityB',    SyntaxAt( 4,  2)
   AssertEqual 'TodoPriorityB',    SyntaxAt( 4,  5)
@@ -124,6 +124,29 @@ Execute (Syntax for priority task):
   AssertEqual 'TodoPriorityX',    SyntaxAt(26,  5)
   AssertEqual 'TodoPriorityY',    SyntaxAt(27,  2)
   AssertEqual 'TodoPriorityY',    SyntaxAt(27,  5)
+Given todo (creation date, inbox and completed);
+2017-09-01 (A) Watch this +Project
+2017-09-01 (B) Do this @Context
+2017-09-01 Turn this into a task
+(A) Watch without a date
+x 2017-09-18 (A) Finished +Project
+Execute (Syntax for creation date, inbox and completed):
+  AssertEqual 'TodoDate',          SyntaxAt(1,  1)
+  AssertEqual 'TodoPriorityAMark', SyntaxAt(1, 12)
+  AssertEqual 'TodoPriorityAMark', SyntaxAt(1, 13)
+  AssertEqual 'TodoPriorityA',     SyntaxAt(1, 16)
+  AssertEqual 'TodoProject',       SyntaxAt(1, 27)
+  AssertEqual 'TodoDate',          SyntaxAt(2,  1)
+  AssertEqual 'TodoPriorityB',     SyntaxAt(2, 12)
+  AssertEqual 'TodoPriorityB',     SyntaxAt(2, 16)
+  AssertEqual 'TodoContext',       SyntaxAt(2, 24)
+  AssertEqual 'TodoDate',          SyntaxAt(3,  1)
+  AssertEqual 'TodoInbox',         SyntaxAt(3, 12)
+  AssertEqual 'TodoPriorityAMark', SyntaxAt(4,  2)
+  AssertEqual 'TodoPriorityA',     SyntaxAt(4,  5)
+  AssertEqual 'TodoDone',          SyntaxAt(5,  1)
+  AssertEqual 'TodoDone',          SyntaxAt(5, 15)
+  AssertEqual 'TodoDone',          SyntaxAt(5, 27)
 Given todo (todo items with invalid or misleading syntax);
 x   .    1    .    2    .    3    .    4    .    5    .    6    .    7    .    8  L01
 x 345678901234567890123456789012345678901234567890123456789012345678901234567890  L02
@@ -148,15 +171,15 @@ due: syntax must be a whole word notdue:2010-01-01 pro@jects and con+texts also 
 x 345678901234567890123456789012345678901234567890123456789012345678901234567890  L21
 x   .    1    .    2    .    3    .    4    .    5    .    6    .    7    .    8  L22
 Execute (Syntax for invalid or misleading tasks):
-  " Invalid done or priority
-  AssertEqual '',                 SyntaxAt( 3,  1)
-  AssertEqual '',                 SyntaxAt( 4,  1)
-  AssertEqual '',                 SyntaxAt( 5,  1)
-  AssertEqual '',                 SyntaxAt( 6,  1)
-  AssertEqual '',                 SyntaxAt( 7,  1)
-  AssertEqual '',                 SyntaxAt( 8,  1)
-  AssertEqual '',                 SyntaxAt( 9,  1)
-  AssertEqual '',                 SyntaxAt(10,  1)
+  " Invalid done or priority: still inbox, not a formulated task
+  AssertEqual 'TodoInbox',        SyntaxAt( 3,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 4,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 5,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 6,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 7,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 8,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt( 9,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt(10,  1)
   " Valid keys and dates at start of line
   AssertEqual 'TodoKey',          SyntaxAt(11,  1)
   AssertEqual 'TodoDate',         SyntaxAt(11,  5)
@@ -165,29 +188,73 @@ Execute (Syntax for invalid or misleading tasks):
   " Invalid date formats.
   " FIXME: Not all cases are tested, not sure how strict to be
   " AssertEqual '',                 SyntaxAt(16, 15)  " FIXME
-  AssertEqual '',                 SyntaxAt(16, 24)
-  " AssertEqual '',                 SyntaxAt(16, 33)  " FIXME
-  AssertEqual '',                 SyntaxAt(16, 42)
-  AssertEqual '',                 SyntaxAt(16, 44)
-  AssertEqual '',                 SyntaxAt(16, 55)
-  " AssertEqual '',                 SyntaxAt(16, 64)  " FIXME
-  AssertEqual '',                 SyntaxAt(16, 78)
+  AssertEqual 'TodoInbox',        SyntaxAt(16, 24)
+  " AssertEqual 'TodoInbox',        SyntaxAt(16, 33)  " FIXME
+  AssertEqual 'TodoInbox',        SyntaxAt(16, 42)
+  AssertEqual 'TodoInbox',        SyntaxAt(16, 44)
+  AssertEqual 'TodoInbox',        SyntaxAt(16, 55)
+  " AssertEqual 'TodoInbox',        SyntaxAt(16, 64)  " FIXME
+  AssertEqual 'TodoInbox',        SyntaxAt(16, 78)
   " Contexts and projects on the start of a line (valid)
   AssertEqual 'TodoContext',      SyntaxAt(17,  1)
   AssertEqual 'TodoProject',      SyntaxAt(18,  1)
   " Invalid keys, etc
-  AssertEqual '',                 SyntaxAt(19,  5)
-  AssertEqual '',                 SyntaxAt(19, 55)
-  AssertEqual '',                 SyntaxAt(20,  1)
+  AssertEqual 'TodoInbox',        SyntaxAt(19,  5)
+  AssertEqual 'TodoInbox',        SyntaxAt(19, 55)
+  AssertEqual 'TodoInbox',        SyntaxAt(20,  1)
   AssertEqual 'TodoKey',          SyntaxAt(20, 34)
   AssertEqual 'TodoDate',         SyntaxAt(20, 41)
-  AssertEqual '',                 SyntaxAt(20, 55)
-  AssertEqual '',                 SyntaxAt(20, 69)
+  AssertEqual 'TodoInbox',        SyntaxAt(20, 55)
+  AssertEqual 'TodoInbox',        SyntaxAt(20, 69)
 Do (Insert a task due today):
   OTask due-\<BS>:\<C-R>=strftime("%Y-%m-%d")\<CR> today\<C-O>
 Then (Syntax for task due today):
   Log getline(1)
   AssertEqual 'TodoDueToday', SyntaxAt(1, 12)
+Execute (Default role highlight links):
+  redir => g:todo_hi
+  silent highlight TodoPriorityA
+  redir END
+  AssertEqual 'Constant', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoPriorityAMark
+  redir END
+  AssertEqual 'Todo', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoPriorityB
+  redir END
+  AssertEqual 'Function', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoPriorityC
+  redir END
+  AssertEqual 'Type', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoPriorityZ
+  redir END
+  AssertEqual 'Type', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoDone
+  redir END
+  AssertEqual 'Comment', matchstr(g:todo_hi, 'links to \zs\S\+')
+  AssertEqual '1', synIDattr(hlID('TodoInbox'), 'italic', 'gui')
+  AssertEqual '1', synIDattr(hlID('TodoInbox'), 'underline', 'gui')
+  let g:Todo_txt_highlight = {'B': 'Statement', 'InboxItalic': 0}
+  call todo#ApplyHighlight()
+  redir => g:todo_hi
+  silent highlight TodoPriorityB
+  redir END
+  AssertEqual 'Statement', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoInbox
+  redir END
+  AssertEqual 'Underlined', matchstr(g:todo_hi, 'links to \zs\S\+')
+  unlet g:Todo_txt_highlight
+  call todo#ApplyHighlight()
+  redir => g:todo_hi
+  silent highlight TodoPriorityB
+  redir END
+  AssertEqual 'Function', matchstr(g:todo_hi, 'links to \zs\S\+')
+  unlet g:todo_hi
 
 " function todo#GetDateRegexForPastDates() {{{2
 

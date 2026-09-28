@@ -30,6 +30,7 @@ Table of Contents                                          *TodoTxt-Contents* ~
         7.4 Done.txt.................................|TodoTxt-Done|
         7.5 Format...................................|TodoTxt-Format|
     8. Fold..........................................|TodoTxt-Fold|
+    9. Highlighting..................................|TodoTxt-Highlight|
 
 ===============================================================================
 1. Release notes                                       *TodoTxt-ReleaseNotes* ~
@@ -374,3 +375,57 @@ they are foldable by context, to use project fold :
 >
 
     let g:Todo_fold_char='+'
+
+===============================================================================
+9. Highlighting                                          *TodoTxt-Highlight*
+
+Lines are colored by role, using highlight groups from the active colorscheme:
+
+	(A)	watch list: work already started, which you keep an eye on.
+		Only the `(A)` mark uses |hl-Todo| (the bright flag). The rest
+		of the line uses |hl-Constant|.
+	(B)	next actions, the list you actually work from. Uses
+		|hl-Function|.
+	(C)–(Z)	formulated tasks outside those two lists. Uses |hl-Type|.
+	no priority
+		inbox: a note that is not a task yet. Uses |hl-Underlined|
+		and italics, so it does not look executable.
+	x ...	completed. The whole line uses |hl-Comment|, including
+		projects, contexts and dates.
+
+A priority is recognized with or without a creation date:
+>
+	(A) Call Mom
+	2017-09-01 (A) Call Mom
+<
+
+*g:Todo_txt_highlight*
+
+Dictionary of overrides. Each value is a highlight group name or a dictionary
+of attributes (`guifg`, `guibg`, `guisp`, `ctermfg`, `ctermbg`, `gui`,
+`cterm`). Only the keys you set are changed:
+>
+	let g:Todo_txt_highlight = {
+	  \ 'A': 'Constant',
+	  \ 'AMark': 'Todo',
+	  \ 'B': 'Function',
+	  \ 'Other': 'Type',
+	  \ 'Inbox': 'Underlined',
+	  \ 'Done': 'Comment',
+	  \ }
+<
+>
+	let g:Todo_txt_highlight = {
+	  \ 'AMark': {'guifg': '#ffcc00', 'ctermfg': '220', 'gui': 'bold', 'cterm': 'bold'},
+	  \ }
+<
+
+`InboxItalic` (default 1) draws inbox lines in italics on top of the linked
+group's colors. Set it to 0 to keep that group as a plain link:
+>
+	let g:Todo_txt_highlight = {'InboxItalic': 0}
+<
+
+A colorscheme may define `TodoPriorityA` and the other `Todo*` groups itself.
+Those definitions are kept unless the same key is set in
+|g:Todo_txt_highlight|. Links are applied again on the |ColorScheme| event.
