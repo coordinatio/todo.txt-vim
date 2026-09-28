@@ -9,7 +9,7 @@ if exists("b:current_syntax")
 endif
 
 " Line roles, lowest priority first. A later match at the same column wins,
-" so a completed line stays TodoDone and is not an inbox item.
+" so an in-progress line stays TodoActive and a completed line stays TodoDone.
 " Sub-items are contained so a completed line stays one dim group.
 let s:todo_inner = 'TodoKey,TodoDate,TodoProject,TodoContext,TodoDueToday,TodoOverDueDate,TodoThresholdDate'
 syntax match TodoInbox /^\(x\s\|\(\d\{4}-\d\{2}-\d\{2} \)\?([A-Z]) \)\@!.\+$/ contains=TodoKey,TodoDate,TodoProject,TodoContext,TodoDueToday,TodoOverDueDate,TodoThresholdDate
@@ -28,6 +28,9 @@ for s:todo_nr in range(char2nr('A'), char2nr('Z'))
                 \ ' /^\(\d\{4}-\d\{2}-\d\{2} \)\?(' . s:todo_letter . ') .\+$/'
                 \ ' contains=' . s:todo_contains
 endfor
+" active:1 marks work in progress. No contained items, so the whole line is
+" one bright group. Placed before TodoDone: a completed line stays dim.
+syntax match TodoActive /\v^(x\s)@!.*<active:1>.*/
 syntax match TodoDone /^[x]\s.\+$/
 syntax match TodoDate '\d\{2,4\}-\d\{2\}-\d\{2\}' contained contains=NONE
 syntax match TodoKey '\S*\S:\S\S*' contained contains=TodoDate

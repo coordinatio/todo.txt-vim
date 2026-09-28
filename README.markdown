@@ -28,6 +28,7 @@
     2. [Priorities](#priorities)
     3. [Dates](#dates)
     4. [Done](#done)
+    5. [In progress](#in-progress)
 8. [Highlighting](#highlighting)
 
 ## Release notes
@@ -332,6 +333,15 @@ disable this behavior by setting the following global variable:
 
     let g:TodoTxtStripDoneItemPriority=1
 
+### In progress
+
++ `<LocalLeader>w` : Toggle the `active:1` tag on the current line
+
+The tag is todo.txt `key:value` metadata for work happening now. Several lines
+may carry it at once, and it does not change the line's priority. A completed
+line is left unchanged. Marking a line done removes the tag; toggling it back
+to undone does not restore the tag.
+
 ### Format
 
 + `<LocalLeader>ff` : Try to fix todo.txt format
@@ -345,6 +355,7 @@ Lines are colored by role, using highlight groups from the active colorscheme:
 + `(C)`–`(Z)` are formulated tasks outside those two lists, drawn with `Type`.
 + A line with no priority is an inbox item: not a task yet. It uses `Underlined` and italics.
 + A completed line (`x ...`) uses `Comment` for the whole line, so projects, contexts and dates fade with it.
++ A line with `active:1` is in progress, on top of its existing role. The whole line is black text on a lime-yellow background (`TodoActive`). A completed line stays `Comment` even if the tag is still there.
 
 Priorities are recognized after an optional creation date (`2017-09-01 (A) ...`).
 
@@ -353,6 +364,7 @@ Override colors with `g:Todo_txt_highlight`. A value is a highlight group name o
 ```vim
 let g:Todo_txt_highlight = {
   \ 'AMark': {'guifg': '#ffcc00', 'ctermfg': '220', 'gui': 'bold', 'cterm': 'bold'},
+  \ 'Active': {'guifg': '#000000', 'guibg': '#D7FF00'},
   \ }
 ```
 

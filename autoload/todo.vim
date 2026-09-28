@@ -101,7 +101,35 @@ function! todo#UnMarkAsDone(status)
     silent s/\C\(.*\) pri:\([A-Z]\)/(\2) \1/e
 endfunction
 
+" Drop the in-progress tag. A preceding space goes with it; a tag at the
+" start of the line takes the following space instead. substitute() rather
+" than :s, so this stays safe inside :global.
+function! s:WithoutActiveTag(line) abort
+    let l:line = substitute(a:line, '\s\+\<active:1\>', '', 'g')
+    return substitute(l:line, '\<active:1\>\s*', '', '')
+endfunction
+
+function! todo#ToggleActive() abort
+    if getline('.') =~# '\C^x\s'
+        return
+    endif
+    let l:line = getline('.')
+    if l:line =~# '\<active:1\>'
+        call setline('.', s:WithoutActiveTag(l:line))
+    elseif l:line =~# '\S'
+        call setline('.', l:line . ' active:1')
+    else
+        call setline('.', 'active:1')
+    endif
+endfunction
+
 function! todo#MarkAsDone(status)
+    " Before the recurrence copy, so the next occurrence is not still in progress.
+    let l:line = getline('.')
+    let l:stripped = s:WithoutActiveTag(l:line)
+    if l:stripped !=# l:line
+        call setline('.', l:stripped)
+    endif
     call todo#CreateNewRecurrence(1)
     if get(g:, 'TodoTxtStripDoneItemPriority', 0)
         exec ':s/\C^(\([A-Z]\))\(.*\)/\2/e'
@@ -886,12 +914,15 @@ function! todo#ApplyHighlight() abort
                 \ 'A': ['TodoPriorityA'],
                 \ 'AMark': ['TodoPriorityAMark'],
                 \ 'B': ['TodoPriorityB'],
+                \ 'Active': ['TodoActive'],
                 \ 'Done': ['TodoDone'],
                 \ 'Inbox': ['TodoInbox'],
                 \ 'Other': s:OtherPriorityGroups(),
                 \ }
     " Identifier is the default foreground in github_light, so (B) would match
     " inbox text. Function is a separate hue there (and in most schemes).
+    " Active is a fixed lime-yellow field: several tasks can be in progress
+    " at once, and the whole line has to read as black on that background.
     let l:defaults = {
                 \ 'A': 'Constant',
                 \ 'AMark': 'Todo',
@@ -899,6 +930,12 @@ function! todo#ApplyHighlight() abort
                 \ 'Other': 'Type',
                 \ 'Inbox': 'Underlined',
                 \ 'Done': 'Comment',
+                \ 'Active': {
+                \   'guifg': '#000000',
+                \   'guibg': '#D7FF00',
+                \   'ctermfg': 16,
+                \   'ctermbg': 190,
+                \ },
                 \ }
 
     for l:role in keys(l:defaults)

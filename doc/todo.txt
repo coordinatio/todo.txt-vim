@@ -29,6 +29,7 @@ Table of Contents                                          *TodoTxt-Contents* ~
         7.3 Dates....................................|TodoTxt-Dates|
         7.4 Done.txt.................................|TodoTxt-Done|
         7.5 Format...................................|TodoTxt-Format|
+        7.6 In progress..............................|TodoTxt-Active|
     8. Fold..........................................|TodoTxt-Fold|
     9. Highlighting..................................|TodoTxt-Highlight|
 
@@ -367,6 +368,15 @@ disable this behavior by setting the following global variable:
 
     `<LocalLeader>ff` : Try to fix todo.txt format
 
+7.6 In progress                                                 *TodoTxt-Active*
+
+    `<LocalLeader>w` : Toggle the `active:1` tag on the current line
+
+The tag is the todo.txt `key:value` metadata for work happening now (several
+lines may carry it at once). It does not change the line's priority. A
+completed line is left unchanged. Marking a line done with `<LocalLeader>x`
+removes the tag; toggling it back to undone does not restore the tag.
+
 ===============================================================================
 8. Fold                                                         *TodoTxt-fold* ~
 
@@ -392,6 +402,11 @@ Lines are colored by role, using highlight groups from the active colorscheme:
 		and italics, so it does not look executable.
 	x ...	completed. The whole line uses |hl-Comment|, including
 		projects, contexts and dates.
+	active:1
+		in progress, on top of whatever role the line already
+		has. The whole line is black text on a lime-yellow
+		background (`TodoActive`). A completed line stays
+		|hl-Comment| even if the tag is still there.
 
 A priority is recognized with or without a creation date:
 >
@@ -417,6 +432,7 @@ of attributes (`guifg`, `guibg`, `guisp`, `ctermfg`, `ctermbg`, `gui`,
 >
 	let g:Todo_txt_highlight = {
 	  \ 'AMark': {'guifg': '#ffcc00', 'ctermfg': '220', 'gui': 'bold', 'cterm': 'bold'},
+	  \ 'Active': {'guifg': '#000000', 'guibg': '#D7FF00'},
 	  \ }
 <
 

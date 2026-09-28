@@ -33,6 +33,8 @@ vnoremap <script> <silent> <buffer> <Plug>TodotxtDecrementDueDateVisual :call <S
 
 noremap  <script> <silent> <buffer> <Plug>DoToggleMarkAsDone :call todo#ToggleMarkAsDone('')<CR>
                 \:silent! call repeat#set("\<Plug>DoToggleMarkAsDone")<CR>
+noremap  <script> <silent> <buffer> <Plug>TodoToggleActive :call todo#ToggleActive()<CR>
+                \:silent! call repeat#set("\<Plug>TodoToggleActive")<CR>
 noremap  <script> <silent> <buffer> <Plug>DoCancel :call todo#ToggleMarkAsDone('Cancelled')<CR>
                 \:silent! call repeat#set("\<Plug>DoCancel")<CR>
 
@@ -59,6 +61,9 @@ if !exists("g:Todo_txt_do_not_map") || ! g:Todo_txt_do_not_map
     noremap  <script> <silent> <buffer> <localleader>a :call todo#PrioritizeAdd('A')<CR>
     noremap  <script> <silent> <buffer> <localleader>b :call todo#PrioritizeAdd('B')<CR>
     noremap  <script> <silent> <buffer> <localleader>c :call todo#PrioritizeAdd('C')<CR>
+
+" In progress {{{3
+    nmap              <silent> <buffer> <localleader>w <Plug>TodoToggleActive
 
 " Insert date {{{3
 if get(g:, "TodoTxtUseAbbrevInsertMode", 0)

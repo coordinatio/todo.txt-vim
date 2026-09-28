@@ -42,6 +42,30 @@ Execute (Syntax for active task):
   AssertEqual 'TodoDate',         SyntaxAt( 4, 43)
   AssertEqual 'TodoProject',      SyntaxAt( 4, 54)
   AssertEqual 'TodoContext',      SyntaxAt( 4, 63)
+Given todo (In-progress tasks marked with active:1);
+(B) Next action +Project @Context active:1
+2017-09-01 (A) Watch +Project @Context active:1
+Inbox thought +Project @Context active:1
+x 2017-09-18 Done task +Project @Context active:1
+(B) Not active inactive:1 still a task
+(B) Not active active:10 still a task
+(B) Do active:1 this +Project
+Execute (Syntax for in-progress tag):
+  AssertEqual 'TodoActive',       SyntaxAt(1,  1)
+  AssertEqual 'TodoActive',       SyntaxAt(1,  5)
+  AssertEqual 'TodoActive',       SyntaxAt(1, 17)
+  AssertEqual 'TodoActive',       SyntaxAt(1, 26)
+  AssertEqual 'TodoActive',       SyntaxAt(1, 35)
+  AssertEqual 'TodoActive',       SyntaxAt(2,  1)
+  AssertEqual 'TodoActive',       SyntaxAt(2, 12)
+  AssertEqual 'TodoActive',       SyntaxAt(3,  1)
+  AssertEqual 'TodoActive',       SyntaxAt(3, 15)
+  AssertEqual 'TodoDone',         SyntaxAt(4,  1)
+  AssertEqual 'TodoDone',         SyntaxAt(4, 24)
+  AssertEqual 'TodoPriorityB',    SyntaxAt(5,  1)
+  AssertEqual 'TodoPriorityB',    SyntaxAt(6,  1)
+  AssertEqual 'TodoActive',       SyntaxAt(7,  1)
+  AssertEqual 'TodoActive',       SyntaxAt(7, 22)
 Given todo (todo items with priority);
 x   .    1    .    2    .    3    .    4    .    5    .    6    .    7    .    8  L01
 x 345678901234567890123456789012345678901234567890123456789012345678901234567890  L02
@@ -238,7 +262,9 @@ Execute (Default role highlight links):
   AssertEqual 'Comment', matchstr(g:todo_hi, 'links to \zs\S\+')
   AssertEqual '1', synIDattr(hlID('TodoInbox'), 'italic', 'gui')
   AssertEqual '1', synIDattr(hlID('TodoInbox'), 'underline', 'gui')
-  let g:Todo_txt_highlight = {'B': 'Statement', 'InboxItalic': 0}
+  AssertEqual '#000000', tolower(synIDattr(hlID('TodoActive'), 'fg#', 'gui'))
+  AssertEqual '#d7ff00', tolower(synIDattr(hlID('TodoActive'), 'bg#', 'gui'))
+  let g:Todo_txt_highlight = {'B': 'Statement', 'InboxItalic': 0, 'Active': 'Error'}
   call todo#ApplyHighlight()
   redir => g:todo_hi
   silent highlight TodoPriorityB
@@ -248,12 +274,18 @@ Execute (Default role highlight links):
   silent highlight TodoInbox
   redir END
   AssertEqual 'Underlined', matchstr(g:todo_hi, 'links to \zs\S\+')
+  redir => g:todo_hi
+  silent highlight TodoActive
+  redir END
+  AssertEqual 'Error', matchstr(g:todo_hi, 'links to \zs\S\+')
   unlet g:Todo_txt_highlight
   call todo#ApplyHighlight()
   redir => g:todo_hi
   silent highlight TodoPriorityB
   redir END
   AssertEqual 'Function', matchstr(g:todo_hi, 'links to \zs\S\+')
+  AssertEqual '#000000', tolower(synIDattr(hlID('TodoActive'), 'fg#', 'gui'))
+  AssertEqual '#d7ff00', tolower(synIDattr(hlID('TodoActive'), 'bg#', 'gui'))
   unlet g:todo_hi
 
 " function todo#GetDateRegexForPastDates() {{{2
@@ -577,6 +609,73 @@ Expect todo (Tasks, completed on today):
 " however, using global avoids catching exceptions, whereas % gets them.
 Execute (Check todo#ToggleMarkAsDone for exceptions):
   :%call todo#ToggleMarkAsDone('')
+
+" function! todo#ToggleActive() {{{2
+
+Given todo (Tasks):
+  (B) Next action
+  (A) Already running active:1
+  Inbox note
+  x 2017-09-18 Done stays done active:1
+  (B) Has inactive:1 in the text
+Execute (Toggle active):
+  call cursor(1, 1)
+  call todo#ToggleActive()
+  call cursor(2, 1)
+  call todo#ToggleActive()
+  call cursor(3, 1)
+  call todo#ToggleActive()
+  call cursor(4, 1)
+  call todo#ToggleActive()
+  call cursor(5, 1)
+  call todo#ToggleActive()
+Expect todo (Tag appended or removed, done line unchanged):
+  (B) Next action active:1
+  (A) Already running
+  Inbox note active:1
+  x 2017-09-18 Done stays done active:1
+  (B) Has inactive:1 in the text active:1
+Execute (Toggle active twice returns to the start):
+  call cursor(1, 1)
+  call todo#ToggleActive()
+  call cursor(2, 1)
+  call todo#ToggleActive()
+  call cursor(3, 1)
+  call todo#ToggleActive()
+  call cursor(4, 1)
+  call todo#ToggleActive()
+  call cursor(5, 1)
+  call todo#ToggleActive()
+  call cursor(1, 1)
+  call todo#ToggleActive()
+  call cursor(2, 1)
+  call todo#ToggleActive()
+  call cursor(3, 1)
+  call todo#ToggleActive()
+  call cursor(4, 1)
+  call todo#ToggleActive()
+  call cursor(5, 1)
+  call todo#ToggleActive()
+Expect todo (Same lines, done line still unchanged):
+  (B) Next action
+  (A) Already running active:1
+  Inbox note
+  x 2017-09-18 Done stays done active:1
+  (B) Has inactive:1 in the text
+
+Given todo (In progress to complete):
+  (B) Next action active:1
+  (A) 2017-09-01 Watch this active:1
+  Plain task
+  (B) Has inactive:1 in the text active:1
+Execute (Mark done strips the in-progress tag):
+  :global/./call todo#MarkAsDone('')
+  :call ReplaceCurrentDates('')
+Expect todo (Done without active:1):
+  x **TODAY** Next action pri:B
+  x **TODAY** 2017-09-01 Watch this pri:A
+  x **TODAY** Plain task
+  x **TODAY** Has inactive:1 in the text pri:B
 
 " function! todo#ToggleMarkAsDone('Cancelled') {{{2
 
