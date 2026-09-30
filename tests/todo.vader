@@ -1795,6 +1795,38 @@ Expect todo (Instance at the top of the file):
   (B) **TODAY** Water the flowers +home rid:c3d4
   (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
 
+Given todo (A repeat stub that lost its rid):
+  (A) Control the repair
+  (P) Pay the internet every:1m last:2026-08-01
+  x 2026-09-01 Old done task
+Execute (Untracked it cannot be guarded, so it never spawns):
+  " Before the fix every pass spawned another copy: the stub survived with its
+  " old last: and nothing recorded an open instance.
+  AssertEqual 0, todo#MaterializeStubs()
+  AssertEqual 0, todo#MaterializeStubs()
+  AssertEqual 0, todo#MaterializeStubs()
+Expect todo (Untouched, pass after pass):
+  (A) Control the repair
+  (P) Pay the internet every:1m last:2026-08-01
+  x 2026-09-01 Old done task
+
+Given todo (Two stubs sharing one rid):
+  (P) Pay the internet every:1m last:2026-08-01 rid:a1b2
+  (P) Pay the internet again every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+Execute (One rid, one instance per pass):
+  " Both stubs are due and the buffer is only rewritten at the end of the
+  " scan, so the pass itself has to remember the rid it just spawned.
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual 1, todo#HasOpenInstance('a1b2')
+  AssertEqual 0, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (The first stub in buffer order wins):
+  (B) **TODAY** Pay the internet rid:a1b2
+  (P) Pay the internet every:1m last:2026-08-01 rid:a1b2
+  (P) Pay the internet again every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+
 " function todo#RepeatTask(period) and todo#ShowTaskLater(when) {{{2
 Before:
 After:
@@ -1833,6 +1865,43 @@ Expect todo (Stub at the very end):
   (B) Pay the internet +home rid:RID
   Inbox note
   (P) Pay the internet +home every:2w rid:RID
+
+Given todo (Completed lines are not one contiguous tail):
+  x 2026-09-01 Old done @aaa
+  (B) Next action @zzz
+  (A) Control @zzz
+Execute (The dialog parks by the same rule as the sorts):
+  " A sort on @ can leave an x line above ordinary tasks; parking before the
+  " first x line would put the stub above them, so it goes to the end.
+  call cursor(2, 1)
+  AssertEqual 1, todo#RepeatTask('1m')
+  silent! %substitute/rid:\S\+/rid:RID/g
+Expect todo (No stub above an ordinary task):
+  x 2026-09-01 Old done @aaa
+  (B) Next action @zzz rid:RID
+  (A) Control @zzz
+  (P) Next action @zzz every:1m rid:RID
+
+Given todo (Completed lines are not one contiguous tail):
+  x 2026-09-01 Old done @aaa
+  Next action @zzz
+  (A) Control @zzz
+Execute (One shot parks at the end as well):
+  call cursor(2, 1)
+  AssertEqual 1, todo#ShowTaskLater('2026-10-14')
+Expect todo (Parked after every ordinary task):
+  x 2026-09-01 Old done @aaa
+  (A) Control @zzz
+  (P) Next action @zzz show:2026-10-14
+
+Given todo (A stub whose every: lost its value):
+  (P) Pay the internet every: rid:a1b2
+Execute (Repeat replaces the empty tag instead of appending):
+  call cursor(1, 1)
+  AssertEqual 1, todo#RepeatTask('2w')
+  AssertEqual 1, line('$')
+Expect todo (One every: tag, with its new value):
+  (P) Pay the internet every:2w rid:a1b2
 
 Given todo (A series already running):
   (B) Pay the internet +home rid:a1b2
@@ -1912,6 +1981,20 @@ Expect todo (last: is today, the stub stays parked):
   (A) Control the repair
   x **TODAY** Pay the internet +home rid:a1b2 pri:B
   Inbox note
+  (P) Pay the internet +home every:1m last:**TODAY** rid:a1b2
+
+Given todo (An instance that gets cancelled):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m rid:a1b2
+Execute (Cancelling stamps last: too, the series stays alive):
+  " On purpose: without last: there is nothing to count the period from, so
+  " cancelling the first instance would kill the series silently.
+  :1,1global/^./call todo#ToggleMarkAsDone('Cancelled')
+  :Assert todo#StubDue(getline(2), todo#DateStringAdd(strftime('%Y-%m-%d'), 1, 'm'))
+  :Assert !todo#StubDue(getline(2), strftime('%Y-%m-%d'))
+  :call ReplaceCurrentDates('')
+Expect todo (The countdown runs from the cancellation):
+  x **TODAY** Cancelled Pay the internet +home rid:a1b2 pri:B
   (P) Pay the internet +home every:1m last:**TODAY** rid:a1b2
 
 Given todo (A series just completed):

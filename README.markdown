@@ -300,6 +300,12 @@ from the actual completion. Stubs due at once are inserted as one block, in
 their own order. `<LocalLeader>X` scans once after the whole batch. The cursor
 stays on the line you just closed.
 
+Cancelling (`<LocalLeader>C`) stamps `last:` too: it goes through the same
+completion path, and the series continues. This is deliberate: if cancelling
+did not stamp, cancelling the first instance would leave the stub without
+`last:` at all, the period would have nothing to count from, and the series
+would die silently.
+
 Sorting parks the `(P)` lines at the tail of the active tasks, and
 `<LocalLeader>j` / `<LocalLeader>k` do nothing on a stub.
 

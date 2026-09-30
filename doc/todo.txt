@@ -354,6 +354,12 @@ order. `<LocalLeader>X` never closes a `(P)` line either, and scans the stubs
 once, after the whole batch. In every case the cursor stays on the line that
 was just closed.
 
+Cancelling an instance (`<LocalLeader>C`) stamps `last:` too: it goes through
+the same |todo#MarkAsDone()| path, and the series continues. This is
+deliberate. If cancelling did not stamp, cancelling the first instance of a
+series would leave its stub without `last:` at all, the period would have
+nothing to count from, and the series would die silently and permanently.
+
 7.4 Periodic tasks and rec:                               *TodoTxt-PeriodicRec*
 
 The tags are deliberately not called `rec:`. `rec:` (|TodoTxt-Recurrence|)

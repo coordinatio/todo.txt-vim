@@ -668,7 +668,9 @@ endfunction
 
 function! s:SetTag(line, key, value) abort
     let l:tag = a:key . ':' . a:value
-    if todo#TagValue(a:line, a:key) !=# ''
+    " Presence, not value: a tag that lost its value ("every:") is still a tag,
+    " and gets replaced instead of gaining a second copy behind it.
+    if a:line =~# '\v\C(^|\s)' . a:key . ':'
         return substitute(a:line, '\v\C(^|\s)' . a:key . ':\S*', '\1' . l:tag, '')
     endif
     " Keep the documented order every: last: rid: when adding last:. \zs leaves
@@ -748,20 +750,13 @@ function! todo#NewRid() abort
     return l:rid
 endfunction
 
-function! s:FirstDoneLine() abort
-    for l:lnum in range(1, line('$'))
-        if s:IsDone(getline(l:lnum))
-            return l:lnum
-        endif
-    endfor
-    return 0
-endfunction
-
 " Stubs live after the ordinary tasks and right before the x block, at the end
-" of the buffer when nothing is completed yet.
+" of the buffer when nothing is completed yet. The dialog and the sorts must
+" not disagree about that place, so both ask s:StubParkIndex(): it also parks
+" at the end when the completed lines are not one contiguous tail, and a stub
+" must never end up above an ordinary task.
 function! s:ParkLine() abort
-    let l:done = s:FirstDoneLine()
-    return l:done > 0 ? l:done : line('$') + 1
+    return s:StubParkIndex(getline(1, '$')) + 1
 endfunction
 
 " Where a task returning to the (B) list goes: before the first (B) task, or
@@ -871,6 +866,19 @@ endfunction
 function! todo#MaterializeStubs() abort
     let l:today = strftime('%Y-%m-%d')
     let l:lines = getline(1, '$')
+    " One pass collects the rids that already have an open instance, instead of
+    " rescanning the buffer per due stub. Rids spawned below join the same
+    " dict, so two stubs sharing one rid cannot both spawn before the buffer
+    " is rewritten.
+    let l:open = {}
+    for l:line in l:lines
+        if s:IsTask(l:line)
+            let l:rid = todo#TagValue(l:line, 'rid')
+            if l:rid !=# ''
+                let l:open[l:rid] = 1
+            endif
+        endif
+    endfor
     let l:block = []
     let l:drop = {}
     for l:i in range(len(l:lines))
@@ -883,11 +891,15 @@ function! todo#MaterializeStubs() abort
             let l:drop[l:i] = 1
         else
             let l:rid = todo#TagValue(l:line, 'rid')
-            " Never a second open instance, and an overdue period does not
-            " pile up: the next countdown starts from the real completion.
-            if l:rid !=# '' && todo#HasOpenInstance(l:rid)
+            " Without rid: the series cannot be tracked, so it must not spawn:
+            " the stub would survive its own due date and copy itself on every
+            " scan. Otherwise never a second open instance, and an overdue
+            " period does not pile up: the next countdown starts from the real
+            " completion.
+            if l:rid ==# '' || has_key(l:open, l:rid)
                 continue
             endif
+            let l:open[l:rid] = 1
         endif
         " Stubs due at once go back as one block, in their own order.
         call add(l:block, todo#MakeTask(l:line, l:today))
