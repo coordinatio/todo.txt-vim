@@ -1147,6 +1147,21 @@ Do (Sort and check cursor position: notoverdue):
 Then (Is cursor on first non-overdue task?):
   AssertEqual 1, line('.')
 
+Given todo (A parked stub carrying a due date):
+  (B) Pay the internet due:2026-10-05
+  Inbox note
+  (P) Water the flowers +garden due:2026-10-01 every:1m rid:b2c3
+  x 2026-09-01 Old done task
+Execute (SortDue re-parks the stub):
+  " due: is an ordinary tag a stub can carry, and the due sort sends the line
+  " wherever its date ranks. Parking must undo that, as every other sort does.
+  call todo#SortDue()
+Expect todo (The stub is back at the tail of the active tasks):
+  (B) Pay the internet due:2026-10-05
+  Inbox note
+  (P) Water the flowers +garden due:2026-10-01 every:1m rid:b2c3
+  x 2026-09-01 Old done task
+
 
 " function todo#Complete(findstart, base) {{{2
 Before:
@@ -2116,6 +2131,23 @@ Do (A real task still changes):
 Expect todo (The task moved up one letter):
   (P) Pay the internet +home every:1m rid:a1b2
   (C) A real next action
+
+Given todo (A stub and a plain note):
+  (P) Pay the internet +home every:1m rid:a1b2
+  A plain inbox note
+Execute (The add-priority mappings are there):
+  AssertEqual ':call todo#PrioritizeAdd(''A'')<CR>', maparg('\a', 'n')
+  AssertEqual ':call todo#PrioritizeAdd(''B'')<CR>', maparg('\b', 'n')
+  AssertEqual ':call todo#PrioritizeAdd(''C'')<CR>', maparg('\c', 'n')
+Execute (Add-priority leaves the stub alone):
+  " Same reason j and k do nothing on a stub: prepending (A)-(C) would push
+  " the (P) marker aside and the series would silently lose its stub.
+  call todo#PrioritizeAdd('B')
+  call cursor(2, 1)
+  call todo#PrioritizeAdd('B')
+Expect todo (The stub keeps its marker, the note gained (B)):
+  (P) Pay the internet +home every:1m rid:a1b2
+  (B) A plain inbox note
 
 
 " Mappings: <LocalLeader>r {{{3

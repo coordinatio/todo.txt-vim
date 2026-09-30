@@ -47,6 +47,11 @@ function! todo#PrioritizeDecrease()
 endfunction
 
 function! todo#PrioritizeAdd (priority)
+    " Same as todo#PrioritizeIncrease(): a (P) stub is not a priority, and
+    " prepending (A)-(C) would push the marker aside and destroy the stub.
+    if todo#IsStub(getline('.'))
+        return
+    endif
     let oldpos=todo#GetCurpos()
     let line=getline('.')
     if line !~ '^([A-F])'
@@ -149,6 +154,10 @@ function! todo#MarkAsDone(status)
     endif
     " Stamp last: before the line is closed: the period of a series is counted
     " from the actual completion, and the stub scan below must already see it.
+    " Accepted trade-off, do not reorder: when CreateNewRecurrence() below
+    " throws on a malformed rec:, last: stays stamped for a completion that
+    " never happened. That is garbage-in, and the stamp must still precede
+    " the marking so the scan sees the real completion date.
     call todo#UpdateStubLast(todo#TagValue(l:stripped, 'rid'), strftime('%Y-%m-%d'))
     call todo#CreateNewRecurrence(1)
     if get(g:, 'TodoTxtStripDoneItemPriority', 0)
@@ -337,6 +346,10 @@ function! todo#SortDue()
     " Change the due:yyyymmdd back to due:yyyy-mm-dd.
     silent! %substitute/\v<(due:\d{4})(\d{2})(\d{2})>/\1-\2-\3/ei
     silent global/\C^x /move$
+    " A stub can carry due: like any task, and the moves above send it wherever
+    " its date ranks. Re-park before the cursor positioning below, so those
+    " searches run on the final layout instead of pointing at stale lines.
+    call s:ParkStubs()
     " Let's check a global for a user preference on the cursor position.
     if exists("g:TodoTxtSortDueDateCursorPos")
         if g:TodoTxtSortDueDateCursorPos ==? "top"
