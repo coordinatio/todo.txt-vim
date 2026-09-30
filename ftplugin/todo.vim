@@ -65,6 +65,9 @@ if !exists("g:Todo_txt_do_not_map") || ! g:Todo_txt_do_not_map
 " In progress {{{3
     nmap              <silent> <buffer> <localleader>w <Plug>TodoToggleActive
 
+" Repeat after completion, or show once later {{{3
+    nnoremap <script> <silent> <buffer> <localleader>r :call todo#RepeatDialog()<CR>
+
 " Insert date {{{3
 if get(g:, "TodoTxtUseAbbrevInsertMode", 0)
     inoreabbrev <script> <silent> <buffer> date: <C-R>=strftime("%Y-%m-%d")<CR>

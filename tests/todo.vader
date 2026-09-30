@@ -128,8 +128,8 @@ Execute (Syntax for priority task):
   AssertEqual 'TodoPriorityN',    SyntaxAt(16,  5)
   AssertEqual 'TodoPriorityO',    SyntaxAt(17,  2)
   AssertEqual 'TodoPriorityO',    SyntaxAt(17,  5)
-  AssertEqual 'TodoPriorityP',    SyntaxAt(18,  2)
-  AssertEqual 'TodoPriorityP',    SyntaxAt(18,  5)
+  AssertEqual 'TodoPeriodic',    SyntaxAt(18,  2)
+  AssertEqual 'TodoPeriodic',    SyntaxAt(18,  5)
   AssertEqual 'TodoPriorityQ',    SyntaxAt(19,  2)
   AssertEqual 'TodoPriorityQ',    SyntaxAt(19,  5)
   AssertEqual 'TodoPriorityR',    SyntaxAt(20,  2)
@@ -286,6 +286,56 @@ Execute (Default role highlight links):
   AssertEqual 'Function', matchstr(g:todo_hi, 'links to \zs\S\+')
   AssertEqual '#000000', tolower(synIDattr(hlID('TodoActive'), 'fg#', 'gui'))
   AssertEqual '#d7ff00', tolower(synIDattr(hlID('TodoActive'), 'bg#', 'gui'))
+  unlet g:todo_hi
+Given todo (Periodic stubs are parked, not formulated);
+(P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2
+2026-09-01 (P) Book a dentist +health show:2026-10-14
+(P) Water the flowers +garden active:1
+x 2026-09-30 (P) Finished stub
+(C) A formulated task +home
+(O) The priority next to P
+Execute (Syntax for a (P) stub):
+  " The whole line is one dim group: tags, dates and projects stay inside it
+  AssertEqual 'TodoPeriodic',   SyntaxAt(1,  1)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(1,  5)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(1, 22)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(1, 42)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(1, 57)
+Execute (A creation date in front of a stub):
+  AssertEqual 'TodoPeriodic',   SyntaxAt(2,  1)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(2, 12)
+  AssertEqual 'TodoPeriodic',   SyntaxAt(2, 31)
+Execute (active:1 and x still win over a stub):
+  AssertEqual 'TodoActive',     SyntaxAt(3,  1)
+  AssertEqual 'TodoActive',     SyntaxAt(3, 31)
+  AssertEqual 'TodoDone',       SyntaxAt(4,  1)
+  AssertEqual 'TodoDone',       SyntaxAt(4, 14)
+Execute (The priorities around P are untouched):
+  AssertEqual 'TodoPriorityC',  SyntaxAt(5,  1)
+  AssertEqual 'TodoPriorityC',  SyntaxAt(5,  5)
+  " A formulated task keeps its inner items, a stub does not
+  AssertEqual 'TodoProject',    SyntaxAt(5, 22)
+  AssertEqual 'TodoPriorityO',  SyntaxAt(6,  1)
+  AssertEqual 'TodoPriorityO',  SyntaxAt(6,  5)
+Execute (Periodic role highlight):
+  redir => g:todo_hi
+  silent highlight TodoPeriodic
+  redir END
+  AssertEqual 'Comment', matchstr(g:todo_hi, 'links to \zs\S\+')
+  " P left the (A)-(Z) loop, so the Other role does not define it either
+  AssertEqual 0, hlexists('TodoPriorityP')
+  let g:Todo_txt_highlight = {'Periodic': 'Statement'}
+  call todo#ApplyHighlight()
+  redir => g:todo_hi
+  silent highlight TodoPeriodic
+  redir END
+  AssertEqual 'Statement', matchstr(g:todo_hi, 'links to \zs\S\+')
+  unlet g:Todo_txt_highlight
+  call todo#ApplyHighlight()
+  redir => g:todo_hi
+  silent highlight TodoPeriodic
+  redir END
+  AssertEqual 'Comment', matchstr(g:todo_hi, 'links to \zs\S\+')
   unlet g:todo_hi
 
 " function todo#GetDateRegexForPastDates() {{{2
@@ -733,6 +783,105 @@ Expect todo (Tasks, cancelled on today):
 " however, using global avoids catching exceptions, whereas % gets them.
 Execute (Check todo#ToggleMarkAsDone for exceptions):
   :%call todo#ToggleMarkAsDone('Cancelled')
+
+" function todo#Sort(type) and todo#HierarchicalSort() {{{2
+
+" Both sorts repoint g:Todo_fold_char at what they sorted on, folding follows
+" the last sort. Put it back, the tests below and above rely on 'x'.
+Before:
+  let g:todo_fold_char_saved = g:Todo_fold_char
+After:
+  let g:Todo_fold_char = g:todo_fold_char_saved
+  unlet g:todo_fold_char_saved
+Given todo (Stubs scattered among the tasks):
+  (B) Pay the internet +home rid:a1b2
+  Inbox note +home
+  (P) Water the flowers +garden every:1m rid:b2c3
+  (A) Control the repair +home
+  (P) Book a dentist +health show:2026-10-14
+  (C) Read the report +work
+  x 2026-09-01 Old done task +home
+Execute (Sort the tasks):
+  " <LocalLeader>s is what the user presses, but \s is a prefix of \sc, \s@,
+  " \s+ and \sd, so a Do block leaves Vim waiting for the rest of the mapping
+  " and the keys leak into the next test. The calls below are what it runs.
+  AssertEqual ':call todo#Sort("")<CR>', maparg('\s', 'n')
+  AssertEqual ':call todo#Sort("@")<CR>', maparg('\s@', 'n')
+  call todo#Sort('')
+Expect todo (Stubs collected at the tail of the active tasks):
+  (A) Control the repair +home
+  (B) Pay the internet +home rid:a1b2
+  (C) Read the report +work
+  Inbox note +home
+  (P) Water the flowers +garden every:1m rid:b2c3
+  (P) Book a dentist +health show:2026-10-14
+  x 2026-09-01 Old done task +home
+
+Given todo (Nothing completed yet):
+  (B) Pay the internet +home rid:a1b2
+  (P) Water the flowers +garden every:1m rid:b2c3
+  Inbox note +home
+  (A) Control the repair +home
+  (P) Book a dentist +health show:2026-10-14
+Execute (Sort the tasks):
+  call todo#Sort('')
+Expect todo (Stubs at the end of the buffer):
+  (A) Control the repair +home
+  (B) Pay the internet +home rid:a1b2
+  Inbox note +home
+  (P) Water the flowers +garden every:1m rid:b2c3
+  (P) Book a dentist +health show:2026-10-14
+
+Given todo (Stubs with contexts):
+  (B) Pay the internet @home rid:a1b2
+  (P) Water the flowers @garden every:1m rid:b2c3
+  (A) Control the repair @home
+  (P) Book a dentist @health show:2026-10-14
+  x 2026-09-01 Old done task @home
+Execute (Sort on the first context):
+  call todo#Sort('@')
+Expect todo (No stub above an ordinary task):
+  (A) Control the repair @home
+  x 2026-09-01 Old done task @home
+  (B) Pay the internet @home rid:a1b2
+  (P) Water the flowers @garden every:1m rid:b2c3
+  (P) Book a dentist @health show:2026-10-14
+
+Given todo (Stubs sharing tags with the tasks):
+  (B) Pay the internet +home @errand rid:a1b2
+  (P) Water the flowers +garden @home every:1m rid:b2c3
+  Inbox note +work @call
+  (A) Control the repair +home @call
+  (P) Book a dentist +health @phone show:2026-10-14
+  x 2026-09-01 Old done task +work @call
+Execute (Sort by project):
+  AssertEqual ":call todo#HierarchicalSort('+', '',1)<CR>", maparg('\sp', 'n')
+  call todo#HierarchicalSort('+', '', 1)
+Expect todo (Stubs not scattered into the project groups):
+  (A) Control the repair +home @call
+  (B) Pay the internet +home @errand rid:a1b2
+  Inbox note +work @call
+  (P) Water the flowers +garden @home every:1m rid:b2c3
+  (P) Book a dentist +health @phone show:2026-10-14
+  x 2026-09-01 Old done task +work @call
+
+Given todo (Stubs sharing tags with the tasks):
+  (B) Pay the internet +home @errand rid:a1b2
+  (P) Water the flowers +garden @home every:1m rid:b2c3
+  Inbox note +work @call
+  (A) Control the repair +home @call
+  (P) Book a dentist +health @phone show:2026-10-14
+  x 2026-09-01 Old done task +work @call
+Execute (Sort by project then context):
+  AssertEqual ":call todo#HierarchicalSort('+', '@',1)<CR>", maparg('\spc', 'n')
+  call todo#HierarchicalSort('+', '@', 1)
+Expect todo (Stubs still parked at the tail):
+  (A) Control the repair +home @call
+  (B) Pay the internet +home @errand rid:a1b2
+  Inbox note +work @call
+  (P) Water the flowers +garden @home every:1m rid:b2c3
+  (P) Book a dentist +health @phone show:2026-10-14
+  x 2026-09-01 Old done task +work @call
 
 " function: todo#SortDue() {{{2
 
@@ -1423,6 +1572,419 @@ Expect todo (Recurring tasks - non-strict, not modified):
   L06 due:2020-01-06 REC:2D REC:2W REC:2Y select first rec: and then chain
   L07 unrelated task 2
 
+" function todo#TagValue(line, tag), todo#ParsePeriod(period), todo#IsStub(line) {{{2
+Before:
+After:
+Given:
+Execute (Read the service tags of a stub):
+  AssertEqual '1m', todo#TagValue('(P) Pay every:1m last:2026-09-01 rid:a1b2', 'every')
+  AssertEqual '2026-09-01', todo#TagValue('(P) Pay every:1m last:2026-09-01 rid:a1b2', 'last')
+  AssertEqual 'a1b2', todo#TagValue('(P) Pay every:1m last:2026-09-01 rid:a1b2', 'rid')
+  AssertEqual 'a1b2', todo#TagValue('(B) Pay the internet +home rid:a1b2', 'rid')
+  " A tag is a whole word, a missing tag is empty
+  AssertEqual '', todo#TagValue('(P) Pay notevery:1m', 'every')
+  AssertEqual '', todo#TagValue('(P) Pay every:1m', 'last')
+Execute (todo#ParsePeriod takes the units of the date arithmetic):
+  AssertEqual [2, 'w'], todo#ParsePeriod('2w')
+  AssertEqual [10, 'd'], todo#ParsePeriod('10d')
+  AssertEqual [1, 'm'], todo#ParsePeriod('1m')
+  AssertEqual [1, 'y'], todo#ParsePeriod('1Y')
+  AssertEqual [], todo#ParsePeriod('')
+  AssertEqual [], todo#ParsePeriod('0d')
+  AssertEqual [], todo#ParsePeriod('w')
+  AssertEqual [], todo#ParsePeriod('1h')
+Execute (todo#IsStub knows the (P) role):
+  Assert todo#IsStub('(P) Pay the internet +home every:1m rid:a1b2')
+  Assert todo#IsStub('2026-09-01 (P) Book a dentist show:2026-10-14')
+  Assert !todo#IsStub('(B) Pay the internet +home rid:a1b2')
+  Assert !todo#IsStub('(P)ay the internet')
+  " A completed line stays completed, whatever its priority
+  Assert !todo#IsStub('x 2026-09-30 Pay the internet pri:P')
+
+" function todo#MakeStub(line, tags) {{{2
+Before:
+After:
+Given:
+Execute (A stub is the wording of the task, without its role):
+  AssertEqual '(P) Pay the internet +home every:1m rid:a1b2',
+    \ todo#MakeStub('2026-09-01 (B) Pay the internet +home', ['every:1m', 'rid:a1b2'])
+  AssertEqual '(P) Pay the internet +home @phone every:1m rid:a1b2',
+    \ todo#MakeStub('(B) 2026-09-01 Pay the internet +home @phone', ['every:1m', 'rid:a1b2'])
+  " active:1 belongs to one concrete line, an ordinary tag travels
+  AssertEqual '(P) Book a dentist +health due:2026-10-01 show:2026-10-14',
+    \ todo#MakeStub('(A) Book a dentist +health active:1 due:2026-10-01', ['show:2026-10-14'])
+  AssertEqual '(P) Pay the internet +home every:2w rid:a1b2',
+    \ todo#MakeStub('(P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2', ['every:2w', 'rid:a1b2'])
+
+" function todo#MakeTask(stub, date) {{{2
+Before:
+After:
+Given:
+Execute (An instance is the stub as a (B) task created today):
+  AssertEqual '(B) 2026-09-30 Pay the internet +home rid:a1b2',
+    \ todo#MakeTask('(P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2', '2026-09-30')
+  " A one-shot stub has no rid:, so the instance has none either
+  AssertEqual '(B) 2026-10-14 Book a dentist +health',
+    \ todo#MakeTask('(P) Book a dentist +health show:2026-10-14', '2026-10-14')
+  AssertEqual '(B) 2026-09-30 Pay the internet +home @phone due:2026-10-05 rid:a1b2',
+    \ todo#MakeTask('(P) Pay the internet +home @phone due:2026-10-05 every:1m rid:a1b2', '2026-09-30')
+
+" function todo#StubDue(stub, today) {{{2
+Before:
+After:
+Given:
+Execute (A repeat stub is due once last: plus every: has passed):
+  " Without last: the first instance is still open, there is nothing to count from
+  Assert !todo#StubDue('(P) Pay the internet every:1m rid:a1b2', '2026-09-30')
+  Assert  todo#StubDue('(P) Pay the internet every:1m last:2026-08-30 rid:a1b2', '2026-09-30')
+  Assert !todo#StubDue('(P) Pay the internet every:1m last:2026-09-01 rid:a1b2', '2026-09-30')
+  " The day the period ends is already due
+  Assert  todo#StubDue('(P) Pay the internet every:1m last:2026-09-01 rid:a1b2', '2026-10-01')
+  Assert  todo#StubDue('(P) Pay the internet every:2w last:2026-09-01 rid:a1b2', '2026-09-15')
+  Assert !todo#StubDue('(P) Pay the internet every:2w last:2026-09-01 rid:a1b2', '2026-09-14')
+  Assert  todo#StubDue('(P) Pay the internet every:1y last:2025-09-30 rid:a1b2', '2026-09-30')
+  Assert  todo#StubDue('(P) Pay the internet every:10d last:2026-09-20 rid:a1b2', '2026-09-30')
+Execute (A one-shot stub is due on its show: day):
+  Assert !todo#StubDue('(P) Book a dentist show:2026-10-14', '2026-10-13')
+  Assert  todo#StubDue('(P) Book a dentist show:2026-10-14', '2026-10-14')
+  Assert  todo#StubDue('(P) Book a dentist show:2026-10-14', '2026-11-01')
+Execute (Only a (P) line with readable tags can be due):
+  Assert !todo#StubDue('(B) Not a stub show:2026-10-14', '2026-10-14')
+  Assert !todo#StubDue('(P) Broken every:xx last:2026-09-01', '2026-10-14')
+  Assert !todo#StubDue('(P) Broken every:1m last:2026-9-1', '2026-10-14')
+  Assert !todo#StubDue('(P) Nothing to do', '2026-10-14')
+
+" function todo#TaskInsertLine() {{{2
+Before:
+After:
+Given todo (Tasks of every role):
+  (A) Control the repair
+  Inbox note
+  (B) First next action
+  (B) Second next action
+  (P) Pay the internet +home every:1m rid:a1b2
+  x 2026-09-01 Old done task
+Execute (Before the first (B) task):
+  AssertEqual 3, todo#TaskInsertLine()
+
+Given todo (No next action left):
+  (A) Control the repair
+  (A) Control the delivery
+  Inbox note
+  (P) Pay the internet +home every:1m rid:a1b2
+  x 2026-09-01 Old done task
+Execute (After the last (A) task):
+  AssertEqual 3, todo#TaskInsertLine()
+
+Given todo (No formulated task left):
+  Inbox note
+  (P) Pay the internet +home every:1m rid:a1b2
+  x 2026-09-01 Old done task
+Execute (At the top of the file):
+  AssertEqual 1, todo#TaskInsertLine()
+
+Given todo (Only completed tasks):
+  x 2026-09-01 Old done task
+  x 2026-09-02 Another done task
+Execute (At the top of the file):
+  AssertEqual 1, todo#TaskInsertLine()
+
+" function todo#MaterializeStubs() {{{2
+Before:
+After:
+Given todo (A series whose period has passed):
+  (A) Control the repair
+  (B) Other next action
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+Execute (Exactly one instance comes back):
+  AssertEqual 1, todo#MaterializeStubs()
+  " The instance is open now, an overdue period does not pile up
+  AssertEqual 1, todo#HasOpenInstance('a1b2')
+  AssertEqual 0, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (One new (B), at the start of the list):
+  (A) Control the repair
+  (B) **TODAY** Pay the internet +home rid:a1b2
+  (B) Other next action
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+
+Given todo (An open instance of a due series):
+  (A) Control the repair
+  (B) Pay the internet +home rid:a1b2
+  Inbox note
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+Execute (Never a second open instance):
+  AssertEqual 0, todo#MaterializeStubs()
+  AssertEqual 0, todo#HasOpenInstance('c3d4')
+Expect todo (Untouched):
+  (A) Control the repair
+  (B) Pay the internet +home rid:a1b2
+  Inbox note
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+
+Given todo (Two series due at once and one still counting):
+  (A) Control the repair
+  Inbox note
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+  (P) Call the bank every:1y last:2026-09-25 rid:e5f6
+  x 2026-09-01 Old done task
+Execute (One block, in the order of the stubs):
+  AssertEqual 2, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (Both instances before the first (B)):
+  (A) Control the repair
+  (B) **TODAY** Pay the internet +home rid:a1b2
+  (B) **TODAY** Water the flowers +home rid:c3d4
+  Inbox note
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+  (P) Call the bank every:1y last:2026-09-25 rid:e5f6
+  x 2026-09-01 Old done task
+
+Given todo (A one-shot stub whose day has come):
+  (A) Control the repair
+  (B) Existing next action
+  Inbox note
+  (P) Book a dentist +health show:2026-09-01
+  x 2026-09-01 Old done task
+Execute (The stub becomes the task and disappears):
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual 5, line('$')
+  call ReplaceCurrentDates('')
+Expect todo (Lifted to the start of the (B) list):
+  (A) Control the repair
+  (B) **TODAY** Book a dentist +health
+  (B) Existing next action
+  Inbox note
+  x 2026-09-01 Old done task
+
+Given todo (A one-shot stub still in the future):
+  (B) Existing next action
+  Book a dentist +health
+Execute (A show: date ahead stays parked):
+  call cursor(2, 1)
+  AssertEqual 1, todo#ShowTaskLater('2w')
+  AssertEqual 0, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (Nothing came back yet):
+  (B) Existing next action
+  (P) Book a dentist +health show:**TODAY+2W**
+
+Given todo (Only a control task and a due stub):
+  (A) Control the repair
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+Execute (Without a (B) list the instance lands after the last (A)):
+  AssertEqual 1, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (Instance after the control task):
+  (A) Control the repair
+  (B) **TODAY** Water the flowers +home rid:c3d4
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+
+Given todo (Nothing but a due stub):
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+Execute (Without any task the instance lands on top):
+  AssertEqual 1, todo#MaterializeStubs()
+  call ReplaceCurrentDates('')
+Expect todo (Instance at the top of the file):
+  (B) **TODAY** Water the flowers +home rid:c3d4
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+
+" function todo#RepeatTask(period) and todo#ShowTaskLater(when) {{{2
+Before:
+After:
+Given todo (Tasks to repeat or to defer):
+  (A) Control the repair
+  (B) Pay the internet +home
+  Inbox note
+  x 2026-09-01 Old done task
+Execute (A repeat leaves the task open and parks its stub):
+  call cursor(2, 1)
+  AssertEqual 1, todo#RepeatTask('1m')
+  AssertEqual 2, line('.')
+  " rid: ties the instance to its stub, the value itself is random
+  let b:rid = todo#TagValue(getline(2), 'rid')
+  AssertEqual 4, len(b:rid)
+  AssertEqual b:rid, todo#TagValue(getline(4), 'rid')
+  AssertEqual '1m', todo#TagValue(getline(4), 'every')
+  " No last: until the first instance is closed
+  AssertEqual '', todo#TagValue(getline(4), 'last')
+  silent! %substitute/rid:\S\+/rid:RID/g
+Expect todo (Stub parked right before the x block):
+  (A) Control the repair
+  (B) Pay the internet +home rid:RID
+  Inbox note
+  (P) Pay the internet +home every:1m rid:RID
+  x 2026-09-01 Old done task
+
+Given todo (Nothing completed yet):
+  (B) Pay the internet +home
+  Inbox note
+Execute (Without an x block the stub goes to the end of the buffer):
+  call cursor(1, 1)
+  AssertEqual 1, todo#RepeatTask('2w')
+  silent! %substitute/rid:\S\+/rid:RID/g
+Expect todo (Stub at the very end):
+  (B) Pay the internet +home rid:RID
+  Inbox note
+  (P) Pay the internet +home every:2w rid:RID
+
+Given todo (A series already running):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+Execute (On the instance only every: changes):
+  call cursor(1, 1)
+  AssertEqual 1, todo#RepeatTask('2w')
+  AssertEqual 2, line('$')
+Expect todo (Still one stub and one open instance):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:2w last:2026-08-01 rid:a1b2
+
+Given todo (A series already running, cursor on the stub):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+Execute (On the stub only every: changes):
+  call cursor(2, 1)
+  AssertEqual 1, todo#RepeatTask('1y')
+  AssertEqual 2, line('$')
+Expect todo (The stub stays where it is):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1y last:2026-08-01 rid:a1b2
+
+Given todo (A task to pick up later):
+  (A) Control the repair
+  Book a dentist +health
+  Inbox note
+  x 2026-09-01 Old done task
+Execute (One shot leaves the working list):
+  call cursor(2, 1)
+  AssertEqual 1, todo#ShowTaskLater('2w')
+  AssertEqual 4, line('$')
+  call ReplaceCurrentDates('')
+Expect todo (Parked as a one-shot stub):
+  (A) Control the repair
+  Inbox note
+  (P) Book a dentist +health show:**TODAY+2W**
+  x 2026-09-01 Old done task
+
+Given todo (A task with a date of its own):
+  Book a dentist +health
+Execute (A calendar date is taken as it is):
+  call cursor(1, 1)
+  AssertEqual 1, todo#ShowTaskLater('2026-10-14')
+Expect todo (Parked with that date):
+  (P) Book a dentist +health show:2026-10-14
+
+Given todo (Tasks that stay as they are):
+  (B) Pay the internet +home
+  x 2026-09-01 Old done task
+Execute (An unreadable answer changes nothing):
+  call cursor(1, 1)
+  AssertEqual 0, todo#RepeatTask('')
+  AssertEqual 0, todo#RepeatTask('1h')
+  AssertEqual 0, todo#ShowTaskLater('soon')
+  AssertEqual '(B) Pay the internet +home', getline(1)
+  AssertEqual 2, line('$')
+Execute (A completed line is left alone):
+  call cursor(2, 1)
+  AssertEqual 0, todo#RepeatTask('1m')
+  AssertEqual 0, todo#ShowTaskLater('1m')
+  AssertEqual 'x 2026-09-01 Old done task', getline(2)
+  AssertEqual 2, line('$')
+
+" function todo#MarkAsDone(status) and the (P) stubs {{{2
+Before:
+After:
+Given todo (An instance of a repeat series):
+  (A) Control the repair
+  (B) Pay the internet +home rid:a1b2
+  Inbox note
+  (P) Pay the internet +home every:1m rid:a1b2
+Execute (Closing the instance stamps last: on its own stub):
+  :2,2global/^./call todo#MarkAsDone('')
+  :call ReplaceCurrentDates('')
+Expect todo (last: is today, the stub stays parked):
+  (A) Control the repair
+  x **TODAY** Pay the internet +home rid:a1b2 pri:B
+  Inbox note
+  (P) Pay the internet +home every:1m last:**TODAY** rid:a1b2
+
+Given todo (A series just completed):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m rid:a1b2
+Execute (The countdown starts at the completion):
+  :1,1global/^./call todo#MarkAsDone('')
+  :AssertEqual 0, todo#MaterializeStubs()
+  :call ReplaceCurrentDates('')
+Expect todo (Quiet for a month):
+  x **TODAY** Pay the internet +home rid:a1b2 pri:B
+  (P) Pay the internet +home every:1m last:**TODAY** rid:a1b2
+
+Given todo (A stub is not a task):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+Execute (A stub is never completed):
+  :2,2global/^./call todo#MarkAsDone('')
+  :AssertEqual 0, todo#MaterializeStubs()
+  :call ReplaceCurrentDates('')
+Expect todo (Nothing closed, nothing spawned):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+
+Given todo (A stub under the mapping):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m rid:a1b2
+Do (Try to close the stub):
+  j\x
+Then (It is still a stub, so it never reaches done.txt):
+  AssertEqual 2, line('.')
+  AssertEqual '(P) Pay the internet +home every:1m rid:a1b2', getline(2)
+Expect todo (Untouched):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m rid:a1b2
+
+Given todo (A due series and a line to close):
+  (A) Control the repair
+  (B) Pay the internet +home rid:a1b2
+  Inbox note
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+Do (Close the instance):
+  j\x
+Then (The cursor stays on the line just closed):
+  AssertEqual 3, line('.')
+  AssertEqual 1, todo#HasOpenInstance('c3d4')
+  call ReplaceCurrentDates('')
+Expect todo (The new task went above, the closed line followed):
+  (A) Control the repair
+  (B) **TODAY** Water the flowers +home rid:c3d4
+  x **TODAY** Pay the internet +home rid:a1b2 pri:B
+  Inbox note
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+
+Given todo (A whole list to close):
+  (A) Control the repair
+  (B) Pay the internet +home rid:a1b2
+  Inbox note
+  (P) Pay the internet +home every:1m rid:a1b2
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+  x 2026-09-01 Old done task
+Execute (Mark all done walks the stubs once, after the :global):
+  :call todo#MarkAllAsDone()
+  :call ReplaceCurrentDates('')
+Expect todo (No stub closed, one instance, no duplicates):
+  (B) **TODAY** Water the flowers +home rid:c3d4
+  x **TODAY** Control the repair pri:A
+  x **TODAY** Pay the internet +home rid:a1b2 pri:B
+  x **TODAY** Inbox note
+  (P) Pay the internet +home every:1m last:**TODAY** rid:a1b2
+  (P) Water the flowers +home every:1w last:2026-09-01 rid:c3d4
+  x 2026-09-01 Old done task
+
 " file: ftplugin/todo.vim {{{1
 
 " Mappings {{{2
@@ -1447,6 +2009,71 @@ Expect todo (Tasks toggled complete):
   x **TODAY** Non-strict recurring task due:2017-01-01
   Non-strict recurring task due:**TODAY+2D** rec:2d
 
+
+" Mappings: <LocalLeader>j / <LocalLeader>k {{{3
+Before:
+After:
+Given todo (Two stubs):
+  (P) Pay the internet +home every:1m rid:a1b2
+  2026-09-01 (P) Book a dentist show:2026-10-14
+Execute (The priority mappings are there):
+  AssertEqual ':call todo#PrioritizeIncrease()<CR>', maparg('\j', 'n')
+  AssertEqual ':call todo#PrioritizeDecrease()<CR>', maparg('\k', 'n')
+Do (Raise and lower the priority of both stubs):
+  \j\kj\kj\k
+Expect todo (The marker stays (P)):
+  (P) Pay the internet +home every:1m rid:a1b2
+  2026-09-01 (P) Book a dentist show:2026-10-14
+
+Given todo (A stub and a real task):
+  (P) Pay the internet +home every:1m rid:a1b2
+  (B) A real next action
+Do (A real task still changes):
+  j\j
+Expect todo (The task moved up one letter):
+  (P) Pay the internet +home every:1m rid:a1b2
+  (C) A real next action
+
+
+" Mappings: <LocalLeader>r {{{3
+Before:
+After:
+Given todo (Tasks):
+  (B) Pay the internet +home
+  x 2026-09-01 Old done task
+Execute (The repeat dialog is mapped):
+  AssertEqual ':call todo#RepeatDialog()<CR>', maparg('\r', 'n')
+Execute (Repeat keeps the task open and parks a stub):
+  " The dialog is two prompts: the mode, then the interval or the date
+  call feedkeys("1\<CR>1m\<CR>")
+  call todo#RepeatDialog()
+  silent! %substitute/rid:\S\+/rid:RID/g
+Expect todo (Instance and stub):
+  (B) Pay the internet +home rid:RID
+  (P) Pay the internet +home every:1m rid:RID
+  x 2026-09-01 Old done task
+Execute (One shot parks the task itself):
+  call feedkeys("2\<CR>2026-10-14\<CR>")
+  call todo#RepeatDialog()
+Expect todo (Stub with show:):
+  (P) Pay the internet +home show:2026-10-14
+  x 2026-09-01 Old done task
+Execute (An empty answer cancels):
+  call feedkeys("2\<CR>\<CR>")
+  call todo#RepeatDialog()
+  call feedkeys("1\<CR>\<CR>")
+  call todo#RepeatDialog()
+Expect todo (Nothing changed):
+  (B) Pay the internet +home
+  x 2026-09-01 Old done task
+Do (A completed line is not even asked):
+  j\r
+Then (The done line is left alone):
+  AssertEqual 2, line('$')
+  AssertEqual 'x 2026-09-01 Old done task', getline(2)
+Expect todo (Nothing changed):
+  (B) Pay the internet +home
+  x 2026-09-01 Old done task
 
 " Mappings: <LocalLeader>p / <LocalLeader>P {{{3
 Before:

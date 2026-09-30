@@ -19,6 +19,11 @@ syntax match TodoPriorityAMark /^(A)/ contained
 syntax match TodoPriorityAMark /\(\d\{4}-\d\{2}-\d\{2} \)\@<=(A)/ contained
 for s:todo_nr in range(char2nr('A'), char2nr('Z'))
     let s:todo_letter = nr2char(s:todo_nr)
+    " P is not a priority in this fork: it marks a parked periodic stub, and it
+    " gets its own dim match below instead of joining the (C)-(Z) tasks.
+    if s:todo_letter ==# 'P'
+        continue
+    endif
     if s:todo_letter ==# 'A'
         let s:todo_contains = 'TodoPriorityAMark,' . s:todo_inner
     else
@@ -28,6 +33,11 @@ for s:todo_nr in range(char2nr('A'), char2nr('Z'))
                 \ ' /^\(\d\{4}-\d\{2}-\d\{2} \)\?(' . s:todo_letter . ') .\+$/'
                 \ ' contains=' . s:todo_contains
 endfor
+" A (P) stub is only a reminder of when a task has to come back, it is not
+" something to do now. contains=NONE keeps its projects, dates and keys from
+" standing out, so the whole line stays as dim as a completed one. Placed
+" before TodoActive and TodoDone: both still win on their own lines.
+syntax match TodoPeriodic /^\(\d\{4}-\d\{2}-\d\{2} \)\?(P) .\+$/ contains=NONE
 " active:1 marks work in progress. No contained items, so the whole line is
 " one bright group. Placed before TodoDone: a completed line stays dim.
 syntax match TodoActive /\v^(x\s)@!.*<active:1>.*/

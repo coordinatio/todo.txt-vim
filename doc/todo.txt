@@ -23,15 +23,21 @@ Table of Contents                                          *TodoTxt-Contents* ~
     4. Completion....................................|TodoTxt-Completion|
     5. Hierarchical Sort.............................|TodoTxt-HierarchicalSort|
     6. Recurrence....................................|TodoTxt-Recurrence|
-    7. Mappings......................................|TodoTxt-Mappings|
-        7.1 Sort.....................................|TodoTxt-Sort|
-        7.2 Priorities...............................|TodoTxt-Priorities|
-        7.3 Dates....................................|TodoTxt-Dates|
-        7.4 Done.txt.................................|TodoTxt-Done|
-        7.5 Format...................................|TodoTxt-Format|
-        7.6 In progress..............................|TodoTxt-Active|
-    8. Fold..........................................|TodoTxt-Fold|
-    9. Highlighting..................................|TodoTxt-Highlight|
+    7. Periodic and deferred tasks...................|TodoTxt-Periodic|
+        7.1 Tags.....................................|TodoTxt-PeriodicTags|
+        7.2 The dialog...............................|TodoTxt-PeriodicDialog|
+        7.3 Completion...............................|TodoTxt-PeriodicDone|
+        7.4 Periodic tasks and rec:..................|TodoTxt-PeriodicRec|
+    8. Mappings......................................|TodoTxt-Mappings|
+        8.1 Sort.....................................|TodoTxt-Sort|
+        8.2 Priorities...............................|TodoTxt-Priorities|
+        8.3 Dates....................................|TodoTxt-Dates|
+        8.4 Done.txt.................................|TodoTxt-Done|
+        8.5 Format...................................|TodoTxt-Format|
+        8.6 In progress..............................|TodoTxt-Active|
+        8.7 Repeat and defer.........................|TodoTxt-Repeat|
+    9. Fold..........................................|TodoTxt-Fold|
+    10. Highlighting.................................|TodoTxt-Highlight|
 
 ===============================================================================
 1. Release notes                                       *TodoTxt-ReleaseNotes* ~
@@ -248,8 +254,116 @@ Examples:
     *   `rec:+1w` - Recurs one week from the due date (strict)
 
 This is a non-standard but widely adopted keyword.
+
+`rec:` copies the task when you complete it. The `(P)` stubs of
+|TodoTxt-Periodic| are a different mechanism: they wait for their own moment.
+
 ===============================================================================
-7. Mappings                                                *TodoTxt-Mappings* ~
+7. Periodic and deferred tasks                             *TodoTxt-Periodic* ~
+
+In this fork `(P)` is not a priority. A `(P)` line is a stub, parked at the end
+of the active tasks, just before the `x ` block (at the end of the buffer when
+nothing is completed yet). You never do a stub: it only says when the task has
+to come back into the `(B)` next actions list.
+
+There are two kinds of stub:
+>
+    (P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2
+    (P) Book a dentist appointment +health show:2026-10-14
+<
+The first one repeats after every completion. The second one is lifted once, on
+the day written in `show:`, and then disappears.
+
+Opening a file materializes nothing. The check runs when a task is completed
+with `<LocalLeader>x`, see |TodoTxt-PeriodicDone|.
+
+7.1 Tags                                                 *TodoTxt-PeriodicTags*
+
+    `every:`  period of a repeating stub: `Nd`, `Nw`, `Nm` or `Ny`, the same
+              units as the existing date arithmetic.
+    `last:`   completion date of the latest instance. It is absent until the
+              first instance is closed, and while it is missing no new
+              instance is created: there is nothing to count the period from.
+    `rid:`    links an instance to its stub. A stub only reacts to the
+              completion of a line carrying the same `rid:`.
+    `show:`   absolute date a one-shot stub is lifted on. The dialog accepts
+              an interval counted from today (`2w`) or a date
+              (`2026-10-14`).
+
+Like every other role, a stub is recognized with or without a creation date in
+front of `(P)`.
+
+7.2 The dialog                                         *TodoTxt-PeriodicDialog*
+
+    `<LocalLeader>r` : Repeat the current task, or show it once later
+
+Two steps: the mode, then the interval or the date.
+
++ Repeat. The current line stays the open instance of the series and gains
+  `rid:`, and a `(P)` stub carrying `every:` and the same `rid:` is appended at
+  the end of the active tasks:
+>
+    (B) Pay the internet +home rid:a1b2
+    ...
+    (P) Pay the internet +home every:1m rid:a1b2
+<
+  If the cursor is already on that stub, or on the instance of a series, the
+  dialog only changes `every:`: a series keeps exactly one stub and one open
+  instance.
+
++ One shot. The current line leaves the working list: it is rewritten as `(P)`
+  with `show:` and moved to the end. It can be picked up again only after that
+  conversion, when the plugin turns it back into a `(B)` task.
+
+An empty answer cancels and leaves the file alone. Completed lines and empty
+lines are not modified. Repeat mode is refused on a one-shot `(P)` line: it has
+no period to change. One-shot mode is refused on a line that already belongs to
+a series.
+
+7.3 Completion                                          *TodoTxt-PeriodicDone*
+
+`<LocalLeader>x` runs the check, in this order:
+
+1. A `(P)` line is never marked done and never reaches `done.txt`.
+2. If the line being closed carries `rid:`, the matching stub gets `last:` set
+   to today. The period is counted from the actual completion.
+3. The line is closed as usual: `active:1` dropped, priority moved to `pri:`,
+   then `x` and the completion date.
+4. The stubs are scanned, and the ones whose moment has come are materialized.
+
+A materialized task is the text of the stub without `every:`, `last:`, `show:`
+and `(P)`, with priority `(B)`, the same `rid:` and today as creation date.
+Projects and contexts are kept:
+>
+    (B) 2026-10-01 Pay the internet +home rid:a1b2
+<
+It is placed at the start of the `(B)` list: before the first `(B)` task, or
+after the last `(A)` when there is no `(B)` task, or at the top of the file
+otherwise. A one-shot stub whose `show:` date has come becomes that same `(B)`
+task, at the same place, and the stub disappears.
+
+Two rules keep a series from overflowing the list:
+
++ A second open instance is never created while a line with the same `rid:` is
+  still unfinished, even if the period is long overdue.
++ An overdue period does not pile up: the next countdown starts from the real
+  completion, so one closed instance gives at most one new task.
+
+Several stubs due at the same time are inserted as one block, in their own
+order. `<LocalLeader>X` never closes a `(P)` line either, and scans the stubs
+once, after the whole batch. In every case the cursor stays on the line that
+was just closed.
+
+7.4 Periodic tasks and rec:                               *TodoTxt-PeriodicRec*
+
+The tags are deliberately not called `rec:`. `rec:` (|TodoTxt-Recurrence|)
+copies the line right away, on `<LocalLeader>x` and on `<LocalLeader>p`, which
+is not what a stub does: it waits, and leaves the copying to the completion
+check. Keeping the names apart leaves the old behavior of `rec:` untouched, and
+a `(P)` line is never duplicated by it.
+
+===============================================================================
+8. Mappings                                                *TodoTxt-Mappings* ~
 
 By default todo-txt.vim set all the mappings described in this section. To
 prevent this behavior, add the following line to your vimrc
@@ -257,7 +371,7 @@ prevent this behavior, add the following line to your vimrc
    let g:Todo_txt_do_not_map=1
 <
 
-7.1 Sort                                                         *TodoTxt-Sort*
+8.1 Sort                                                         *TodoTxt-Sort*
 
     `<LocalLeader>s` : Sort the file by priority
 
@@ -290,7 +404,11 @@ Possible values are :
 + `notoverdue`: The first task that is not overdue (requires #13)
 + `bottom`: The last line of the buffer
 
-7.2 Priorities                                             *TodoTxt-Priorities*
+Whatever the sort key is, the `(P)` stubs are parked at the tail of the active
+tasks, after the ordinary tasks and before the completed ones. See
+|TodoTxt-Periodic|.
+
+8.2 Priorities                                           *TodoTxt-Priorities*
 
     `<LocalLeader>j` : Lower the priority of the current line
 
@@ -302,7 +420,10 @@ Possible values are :
 
     `<LocalLeader>c` : Add the priority (C) to the current line
 
-7.3 Dates                                                       *TodoTxt-Dates*
+`<LocalLeader>j` and `<LocalLeader>k` do nothing on a `(P)` line. A stub is not
+a priority, and cycling the letter would turn the marker into `(O)` or `(Q)`.
+
+8.3 Dates                                                     *TodoTxt-Dates*
 
     `<LocalLeader>d` : Insert the current date
 
@@ -342,7 +463,7 @@ is unavailable on abbreviations. Turning abbreviations mode will change
 
 For more information regarding abbreviations, see |abbreviations|
 
-7.4 Done                                                         *TodoTxt-Done*
+8.4 Done                                                         *TodoTxt-Done*
 
 
     `<LocalLeader>x` : Toggle mark task as done (inserts or remove current
@@ -364,11 +485,15 @@ disable this behavior by setting the following global variable:
     let g:TodoTxtStripDoneItemPriority=1
 <
 
-7.5 Format                                                     *TodoTxt-format*
+A `(P)` line is never marked done, neither by `<LocalLeader>x` nor by
+`<LocalLeader>X`, and never reaches the done file. Completing a task is what
+triggers the periodic check instead, see |TodoTxt-PeriodicDone|.
+
+8.5 Format                                                     *TodoTxt-Format*
 
     `<LocalLeader>ff` : Try to fix todo.txt format
 
-7.6 In progress                                                 *TodoTxt-Active*
+8.6 In progress                                                *TodoTxt-Active*
 
     `<LocalLeader>w` : Toggle the `active:1` tag on the current line
 
@@ -377,8 +502,17 @@ lines may carry it at once). It does not change the line's priority. A
 completed line is left unchanged. Marking a line done with `<LocalLeader>x`
 removes the tag; toggling it back to undone does not restore the tag.
 
+8.7 Repeat and defer                                           *TodoTxt-Repeat*
+
+    `<LocalLeader>r` : Repeat the current task after every completion, or park
+    it as a one-shot `(P)` line shown again later
+
+The dialog asks two questions: the mode, then the interval (`2w`, `10d`, `1m`,
+`1y`) or, for the one-shot case, a date. An empty answer cancels. Completed and
+empty lines are left alone. See |TodoTxt-Periodic|.
+
 ===============================================================================
-8. Fold                                                         *TodoTxt-fold* ~
+9. Fold                                                        *TodoTxt-Fold* ~
 
 Todo.txt files can be folded by projects or context (see |fold|), by default
 they are foldable by context, to use project fold :
@@ -387,7 +521,7 @@ they are foldable by context, to use project fold :
     let g:Todo_fold_char='+'
 
 ===============================================================================
-9. Highlighting                                          *TodoTxt-Highlight*
+10. Highlighting                                            *TodoTxt-Highlight*
 
 Lines are colored by role, using highlight groups from the active colorscheme:
 
@@ -396,7 +530,12 @@ Lines are colored by role, using highlight groups from the active colorscheme:
 		of the line uses |hl-Constant|.
 	(B)	next actions, the list you actually work from. Uses
 		|hl-Function|.
-	(C)–(Z)	formulated tasks outside those two lists. Uses |hl-Type|.
+	(C)–(Z)	formulated tasks outside those two lists, `P` excluded.
+		Uses |hl-Type|.
+	(P)	periodic stub, not a priority (|TodoTxt-Periodic|). The
+		whole line uses |hl-Comment| (`TodoPeriodic`), so a stub
+		does not look like a formulated task. `active:1` and a
+		completed line still take precedence.
 	no priority
 		inbox: a note that is not a task yet. Uses |hl-Underlined|
 		and italics, so it does not look executable.
@@ -427,6 +566,7 @@ of attributes (`guifg`, `guibg`, `guisp`, `ctermfg`, `ctermbg`, `gui`,
 	  \ 'Other': 'Type',
 	  \ 'Inbox': 'Underlined',
 	  \ 'Done': 'Comment',
+	  \ 'Periodic': 'Comment',
 	  \ }
 <
 >

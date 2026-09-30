@@ -30,10 +30,19 @@ function! todo#GetCurpos()
 endfunction
 
 function! todo#PrioritizeIncrease()
+    " A (P) stub is not a priority: raising it would turn the marker into (Q)
+    " and the stub would stop being a stub.
+    if todo#IsStub(getline('.'))
+        return
+    endif
     normal! 0f)h
 endfunction
 
 function! todo#PrioritizeDecrease()
+    " Same as todo#PrioritizeIncrease(): the marker must stay (P).
+    if todo#IsStub(getline('.'))
+        return
+    endif
     normal! 0f)h
 endfunction
 
@@ -123,13 +132,24 @@ function! todo#ToggleActive() abort
     endif
 endfunction
 
+" Set while todo#MarkAllAsDone() runs its :global, see that function.
+let s:marking_all = 0
+
 function! todo#MarkAsDone(status)
-    " Before the recurrence copy, so the next occurrence is not still in progress.
     let l:line = getline('.')
+    " A (P) stub is not a task: it is never completed and never reaches
+    " done.txt. Only its instances are.
+    if todo#IsStub(l:line)
+        return
+    endif
+    " Before the recurrence copy, so the next occurrence is not still in progress.
     let l:stripped = s:WithoutActiveTag(l:line)
     if l:stripped !=# l:line
         call setline('.', l:stripped)
     endif
+    " Stamp last: before the line is closed: the period of a series is counted
+    " from the actual completion, and the stub scan below must already see it.
+    call todo#UpdateStubLast(todo#TagValue(l:stripped, 'rid'), strftime('%Y-%m-%d'))
     call todo#CreateNewRecurrence(1)
     if get(g:, 'TodoTxtStripDoneItemPriority', 0)
         exec ':s/\C^(\([A-Z]\))\(.*\)/\2/e'
@@ -145,10 +165,21 @@ function! todo#MarkAsDone(status)
     else
         normal! Ix 
     endif
+    " Inside :global an inserted line shifts the traversal, so a batch scans the
+    " stubs once, after every line has been closed (todo#MarkAllAsDone()).
+    if !s:marking_all
+        call todo#MaterializeStubs()
+    endif
 endfunction
 
 function! todo#MarkAllAsDone()
-    :g!/^x /:call todo#MarkAsDone('')
+    let s:marking_all = 1
+    try
+        :g!/^x /:call todo#MarkAsDone('')
+    finally
+        let s:marking_all = 0
+    endtry
+    call todo#MaterializeStubs()
 endfunction
 
 function! s:AppendToFile(file, lines)
@@ -199,6 +230,8 @@ function! todo#Sort(type)
     let oldcursor=todo#GetCurpos()
     if(a:type != "")
         exec ':sort /.\{-}\ze'.a:type.'/'
+        " Stubs are not sorted with the tasks, they go back to their tail.
+        call s:ParkStubs()
     elseif expand('%')=~'[Dd]one.*.txt'
         " FIXME: Put some unit tests around this, and fix case sensitivity if ignorecase is set.
         silent! %s/\(x\s*\d\{4}\)-\(\d\{2}\)-\(\d\{2}\)/\1\2\3/g
@@ -234,8 +267,46 @@ function! todo#Sort(type)
             silent execute ':'.l:first.','.l:last.'sort /+[a-zA-Z]*/ r'
             silent execute ':'.l:first.','.l:last.'sort /\v([A-Z])/ r'
         endif
+        " Last step: collect the (P) stubs again at the tail of the active
+        " tasks, the sorts above put them wherever their tags sent them.
+        call s:ParkStubs()
     endif
     call setpos('.', oldcursor)
+endfunction
+
+" Move every (P) stub to the place it belongs: after all the ordinary tasks
+" and right before the x block, at the end of the buffer when nothing is
+" completed yet. The stubs keep their relative order. Called after a sort has
+" already done its own ordering, so it only has to undo the scattering.
+function! s:ParkStubs() abort
+    let l:lines = getline(1, '$')
+    let l:stubs = filter(copy(l:lines), 'todo#IsStub(v:val)')
+    if empty(l:stubs)
+        return
+    endif
+    let l:kept = filter(copy(l:lines), '!todo#IsStub(v:val)')
+    call extend(l:kept, l:stubs, s:StubParkIndex(l:kept))
+    call s:SetBufferLines(l:kept)
+endfunction
+
+" Index in a:lines the stubs are inserted at: right before the x block, or at
+" the end of the buffer when nothing is completed. A sort on a single tag does
+" not keep the completed lines together, and a stub must never end up above an
+" ordinary task, so a completed line with a task below it parks the stubs last.
+function! s:StubParkIndex(lines) abort
+    let l:at = len(a:lines)
+    for l:i in range(len(a:lines))
+        if s:IsDone(a:lines[l:i])
+            let l:at = l:i
+            break
+        endif
+    endfor
+    for l:i in range(l:at, len(a:lines) - 1)
+        if !s:IsDone(a:lines[l:i])
+            return len(a:lines)
+        endif
+    endfor
+    return l:at
 endfunction
 
 function! todo#SortDue()
@@ -389,6 +460,9 @@ function! todo#HierarchicalSort(symbol, symbolsub, dolastsort)
             endif
         endif
     endfor
+    " Stubs are parked, not grouped: a (P) line carries the same +project and
+    " @context tags as its instances, but it must not end up inside a group.
+    call s:ParkStubs()
     " Restore the cursor position
     call setpos('.', position)
 endfunction
@@ -544,6 +618,419 @@ function! todo#ChangeDueDate(units, unit_type, from_reference)
         throw "Failed to set line"
     endif
 endfunction "}}}
+
+" Periodic and deferred tasks {{{1
+"
+" A (P) line is not a priority and not a task either: it is a stub parked at
+" the end of the active tasks. It only says when a task has to come back into
+" the (B) list. Two kinds of stub:
+"   (P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2   repeat
+"   (P) Book a dentist +health show:2026-10-14                     once
+" The tags are deliberately not named rec:: todo#CreateNewRecurrence() copies
+" the line right away, a stub waits for its own moment and leaves the copying
+" to todo#MaterializeStubs().
+
+let s:done_re = '\v\C^x\s'
+" Role markers are recognised with an optional creation date in front, as
+" everywhere else in the plugin: "2017-09-01 (A) ...".
+let s:priority_re = '\v\C^(\d{4}-\d{2}-\d{2}\s+)?\(\zs[A-Z]\ze\)\s'
+let s:stub_re = '\v\C^(\d{4}-\d{2}-\d{2}\s+)?\(P\)\s'
+let s:date_re = '\v\C^\d{4}-\d{2}-\d{2}$'
+let s:period_re = '\v\C^\s*(\d+)\s*([dwmyDWMY])\s*$'
+" Two series created in the same second still need two different rids.
+let s:rid_counter = 0
+
+function! s:IsDone(line) abort
+    return a:line =~# s:done_re
+endfunction
+
+function! s:IsTask(line) abort
+    " Only an unfinished, non-stub line can be an open instance of a series.
+    return a:line =~# '\S' && !s:IsDone(a:line) && !todo#IsStub(a:line)
+endfunction
+
+function! s:Priority(line) abort
+    return matchstr(a:line, s:priority_re)
+endfunction
+
+function! todo#IsStub(line) abort
+    return a:line =~# s:stub_re
+endfunction
+
+function! s:ValidDate(date) abort
+    return a:date =~# s:date_re
+endfunction
+
+function! todo#TagValue(line, tag) abort
+    " Whole word, so "notevery:1m" is not an every: tag.
+    return matchstr(a:line, '\v\C(^|\s)' . a:tag . ':\zs\S*')
+endfunction
+
+function! s:SetTag(line, key, value) abort
+    let l:tag = a:key . ':' . a:value
+    if todo#TagValue(a:line, a:key) !=# ''
+        return substitute(a:line, '\v\C(^|\s)' . a:key . ':\S*', '\1' . l:tag, '')
+    endif
+    " Keep the documented order every: last: rid: when adding last:. \zs leaves
+    " the space in front of rid: out of the replaced text, so no \1 here. A
+    " (^|\s) group in front of \zs silently fails to match, hence \s only.
+    if a:key ==# 'last' && a:line =~# '\v\C\srid:'
+        return substitute(a:line, '\v\C\s\zsrid:', l:tag . ' rid:', '')
+    endif
+    return a:line . ' ' . l:tag
+endfunction
+
+function! s:StubBody(line) abort
+    " What the stub and its instances have in common: the wording, projects,
+    " contexts and ordinary tags. Priority, creation date, service tags and
+    " active:1 belong to one concrete line and are re-added by the caller.
+    let l:body = s:WithoutActiveTag(a:line)
+    let l:body = substitute(l:body, '\v\C^\s*(\d{4}-\d{2}-\d{2}\s+)?\([A-Z]\)\s+', '', '')
+    let l:body = substitute(l:body, '\v\C^\s*\([A-Z]\)\s+\d{4}-\d{2}-\d{2}\s+', '', '')
+    let l:body = substitute(l:body, '\v\C^\s*\d{4}-\d{2}-\d{2}\s+', '', '')
+    " A removed tag takes a preceding space with it, like s:WithoutActiveTag().
+    let l:body = substitute(l:body, '\v\C\s+<%(every|last|show|rid):\S*', '', 'g')
+    let l:body = substitute(l:body, '\v\C^<%(every|last|show|rid):\S*\s*', '', 'g')
+    return substitute(l:body, '\v\s+$', '', 'g')
+endfunction
+
+" Build a stub out of a task line. a:tags is a list like ['every:1m', 'rid:a1b2']
+" or ['show:2026-10-14'], written in the order given.
+function! todo#MakeStub(line, tags) abort
+    let l:body = s:StubBody(a:line)
+    let l:stub = l:body ==# '' ? '(P)' : '(P) ' . l:body
+    return empty(a:tags) ? l:stub : l:stub . ' ' . join(a:tags, ' ')
+endfunction
+
+" The single open instance of a stub: the stub text as a (B) task created
+" today, with the same rid: so the stub still recognises its instance.
+function! todo#MakeTask(stub, date) abort
+    let l:task = '(B)'
+    if s:ValidDate(a:date)
+        let l:task .= ' ' . a:date
+    endif
+    let l:body = s:StubBody(a:stub)
+    if l:body !=# ''
+        let l:task .= ' ' . l:body
+    endif
+    let l:rid = todo#TagValue(a:stub, 'rid')
+    return l:rid ==# '' ? l:task : l:task . ' rid:' . l:rid
+endfunction
+
+function! todo#ParsePeriod(period) abort
+    " Same units as the existing date arithmetic: Nd, Nw, Nm, Ny.
+    let l:parts = matchlist(a:period, s:period_re)
+    if empty(l:parts) || str2nr(l:parts[1]) < 1
+        return []
+    endif
+    return [str2nr(l:parts[1]), tolower(l:parts[2])]
+endfunction
+
+function! s:RidTaken(rid) abort
+    for l:lnum in range(1, line('$'))
+        if todo#TagValue(getline(l:lnum), 'rid') ==# a:rid
+            return 1
+        endif
+    endfor
+    return 0
+endfunction
+
+function! todo#NewRid() abort
+    " A rid only has to be unique inside one file. The clock gives the value,
+    " s:rid_counter keeps two series made in the same second apart, and the
+    " loop catches a clash with a rid already in the buffer.
+    let l:seed = localtime()
+    let l:rid = tolower(printf('%04x', l:seed % 0x10000))
+    while s:RidTaken(l:rid)
+        let s:rid_counter += 1
+        let l:rid = tolower(printf('%04x', (l:seed + s:rid_counter) % 0x10000))
+    endwhile
+    return l:rid
+endfunction
+
+function! s:FirstDoneLine() abort
+    for l:lnum in range(1, line('$'))
+        if s:IsDone(getline(l:lnum))
+            return l:lnum
+        endif
+    endfor
+    return 0
+endfunction
+
+" Stubs live after the ordinary tasks and right before the x block, at the end
+" of the buffer when nothing is completed yet.
+function! s:ParkLine() abort
+    let l:done = s:FirstDoneLine()
+    return l:done > 0 ? l:done : line('$') + 1
+endfunction
+
+" Where a task returning to the (B) list goes: before the first (B) task, or
+" after the last (A) when there is none, or at the very top of the file.
+" Returns the index in a:lines to insert at, so the list order is kept.
+function! s:TaskInsertIndex(lines) abort
+    let l:first_b = -1
+    let l:last_a = -1
+    for l:i in range(len(a:lines))
+        let l:line = a:lines[l:i]
+        if !s:IsTask(l:line)
+            continue
+        endif
+        let l:priority = s:Priority(l:line)
+        if l:priority ==# 'B' && l:first_b < 0
+            let l:first_b = l:i
+        elseif l:priority ==# 'A'
+            let l:last_a = l:i
+        endif
+    endfor
+    if l:first_b >= 0
+        return l:first_b
+    endif
+    return l:last_a >= 0 ? l:last_a + 1 : 0
+endfunction
+
+function! todo#TaskInsertLine() abort
+    return s:TaskInsertIndex(getline(1, '$')) + 1
+endfunction
+
+function! s:DateReached(date, today) abort
+    " ISO dates sort as strings, no need to parse them.
+    return s:ValidDate(a:date) && a:date <=# a:today
+endfunction
+
+" Is this stub ready to put a task back into the (B) list? Whether an open
+" instance already exists is a question about the whole buffer and is checked
+" separately by todo#MaterializeStubs().
+function! todo#StubDue(stub, today) abort
+    if !todo#IsStub(a:stub)
+        return 0
+    endif
+    let l:show = todo#TagValue(a:stub, 'show')
+    if l:show !=# ''
+        return s:DateReached(l:show, a:today)
+    endif
+    let l:period = todo#ParsePeriod(todo#TagValue(a:stub, 'every'))
+    if empty(l:period)
+        return 0
+    endif
+    " Without last: the first instance is still open, there is nothing to count
+    " the period from yet.
+    let l:last = todo#TagValue(a:stub, 'last')
+    if !s:ValidDate(l:last)
+        return 0
+    endif
+    return s:DateReached(todo#DateStringAdd(l:last, l:period[0], l:period[1]), a:today)
+endfunction
+
+function! todo#HasOpenInstance(rid) abort
+    if a:rid ==# ''
+        return 0
+    endif
+    for l:lnum in range(1, line('$'))
+        let l:line = getline(l:lnum)
+        if s:IsTask(l:line) && todo#TagValue(l:line, 'rid') ==# a:rid
+            return 1
+        endif
+    endfor
+    return 0
+endfunction
+
+function! todo#UpdateStubLast(rid, date) abort
+    if a:rid ==# '' || !s:ValidDate(a:date)
+        return 0
+    endif
+    for l:lnum in range(1, line('$'))
+        let l:line = getline(l:lnum)
+        if todo#IsStub(l:line) && todo#TagValue(l:line, 'rid') ==# a:rid
+            " setline(), not :s: this runs inside the :global of MarkAllAsDone.
+            call setline(l:lnum, s:SetTag(l:line, 'last', a:date))
+            return 1
+        endif
+    endfor
+    return 0
+endfunction
+
+function! s:SetBufferLines(lines) abort
+    let l:count = line('$')
+    call setline(1, a:lines)
+    if l:count > len(a:lines)
+        call s:DeleteLines(len(a:lines) + 1, l:count)
+    endif
+endfunction
+
+function! s:DeleteLines(first, last) abort
+    if exists('*deletebufline')
+        call deletebufline(bufnr('%'), a:first, a:last)
+    else
+        silent execute a:first . ',' . a:last . 'delete _'
+    endif
+endfunction
+
+" Walk the (P) stubs and put back every task whose moment has come. Returns the
+" number of tasks inserted. Called once per completion, and once after a whole
+" todo#MarkAllAsDone() batch, never from inside its :global.
+function! todo#MaterializeStubs() abort
+    let l:today = strftime('%Y-%m-%d')
+    let l:lines = getline(1, '$')
+    let l:block = []
+    let l:drop = {}
+    for l:i in range(len(l:lines))
+        let l:line = l:lines[l:i]
+        if !todo#IsStub(l:line) || !todo#StubDue(l:line, l:today)
+            continue
+        endif
+        if todo#TagValue(l:line, 'show') !=# ''
+            " A one-shot stub becomes the task itself, the stub disappears.
+            let l:drop[l:i] = 1
+        else
+            let l:rid = todo#TagValue(l:line, 'rid')
+            " Never a second open instance, and an overdue period does not
+            " pile up: the next countdown starts from the real completion.
+            if l:rid !=# '' && todo#HasOpenInstance(l:rid)
+                continue
+            endif
+        endif
+        " Stubs due at once go back as one block, in their own order.
+        call add(l:block, todo#MakeTask(l:line, l:today))
+    endfor
+    if empty(l:block)
+        return 0
+    endif
+    let l:kept = []
+    let l:moved = []
+    for l:i in range(len(l:lines))
+        call add(l:moved, has_key(l:drop, l:i) ? -1 : len(l:kept))
+        if !has_key(l:drop, l:i)
+            call add(l:kept, l:lines[l:i])
+        endif
+    endfor
+    let l:at = s:TaskInsertIndex(l:kept)
+    for l:line in reverse(copy(l:block))
+        call insert(l:kept, l:line, l:at)
+    endfor
+    call s:SetBufferLines(l:kept)
+    " Keep the cursor on the line it was on, the block above may have moved it.
+    call cursor(s:AnchorLine(l:moved, l:at, len(l:block), line('.') - 1) + 1, col('.'))
+    return len(l:block)
+endfunction
+
+" New index of the line the cursor was on, or the closest surviving one.
+function! s:AnchorLine(moved, at, added, anchor) abort
+    let l:i = min([a:anchor, len(a:moved) - 1])
+    while l:i >= 0 && a:moved[l:i] < 0
+        let l:i -= 1
+    endwhile
+    if l:i < 0
+        return a:at
+    endif
+    let l:new = a:moved[l:i]
+    return l:new >= a:at ? l:new + a:added : l:new
+endfunction
+
+" Make the current line the open instance of a repeat series and park its (P)
+" stub at the end. On a line that already belongs to a series only every:
+" changes: there must stay exactly one stub and one open instance.
+function! todo#RepeatTask(period) abort
+    let l:period = todo#ParsePeriod(a:period)
+    if empty(l:period)
+        return s:Error('invalid period, expected something like 2w, 10d, 1m or 1y')
+    endif
+    let l:lnum = line('.')
+    let l:line = getline(l:lnum)
+    if l:line !~# '\S' || s:IsDone(l:line)
+        return 0
+    endif
+    let l:every = l:period[0] . l:period[1]
+    if todo#IsStub(l:line)
+        if todo#TagValue(l:line, 'show') !=# ''
+            return s:Error('a one-shot (P) line has no period to change')
+        endif
+        call setline(l:lnum, s:SetTag(l:line, 'every', l:every))
+        return 1
+    endif
+    let l:rid = todo#TagValue(l:line, 'rid')
+    if l:rid !=# ''
+        for l:stub in range(1, line('$'))
+            if todo#IsStub(getline(l:stub)) && todo#TagValue(getline(l:stub), 'rid') ==# l:rid
+                call setline(l:stub, s:SetTag(getline(l:stub), 'every', l:every))
+                return 1
+            endif
+        endfor
+    endif
+    let l:rid = todo#NewRid()
+    call setline(l:lnum, s:SetTag(l:line, 'rid', l:rid))
+    call append(s:ParkLine() - 1, todo#MakeStub(getline(l:lnum), ['every:' . l:every, 'rid:' . l:rid]))
+    return 1
+endfunction
+
+" Park the current line as a one-shot (P) stub: it leaves the working list and
+" comes back on its own, as a (B) task, on the day asked for.
+function! todo#ShowTaskLater(when) abort
+    let l:date = s:ParseWhen(a:when)
+    if l:date ==# ''
+        return s:Error('invalid date, expected an interval like 2w or a date like 2026-10-14')
+    endif
+    let l:lnum = line('.')
+    let l:line = getline(l:lnum)
+    if l:line !~# '\S' || s:IsDone(l:line)
+        return 0
+    endif
+    if todo#IsStub(l:line) || todo#TagValue(l:line, 'rid') !=# ''
+        return s:Error('this line already belongs to a repeat series')
+    endif
+    let l:stub = todo#MakeStub(l:line, ['show:' . l:date])
+    let l:park = s:ParkLine()
+    call append(l:park - 1, l:stub)
+    if l:lnum >= l:park
+        let l:lnum += 1
+    endif
+    call s:DeleteLines(l:lnum, l:lnum)
+    call cursor(min([l:lnum, line('$')]), 1)
+    return 1
+endfunction
+
+function! s:ParseWhen(when) abort
+    if s:ValidDate(a:when)
+        return a:when
+    endif
+    let l:period = todo#ParsePeriod(a:when)
+    if empty(l:period)
+        return ''
+    endif
+    return todo#DateStringAdd(strftime('%Y-%m-%d'), l:period[0], l:period[1])
+endfunction
+
+function! s:Error(message) abort
+    echohl ErrorMsg
+    echomsg 'Todo.txt: ' . a:message
+    echohl None
+    return 0
+endfunction
+
+" <LocalLeader>r. Thin on purpose: everything that can be tested lives in
+" todo#RepeatTask() and todo#ShowTaskLater().
+function! todo#RepeatDialog() abort
+    let l:line = getline('.')
+    if l:line !~# '\S' || s:IsDone(l:line)
+        return
+    endif
+    let l:mode = inputlist(['Repeat this task:',
+                \ '1. after every completion (every:)',
+                \ '2. once, later (show:)'])
+    if l:mode < 1 || l:mode > 2
+        return
+    endif
+    let l:prompt = l:mode == 1 ? 'Every (2w, 10d, 1m, 1y): ' : 'Show at (2w or 2026-10-14): '
+    let l:answer = substitute(input(l:prompt), '\v^\s+|\s+$', '', 'g')
+    " An empty answer cancels and leaves the file alone.
+    if l:answer ==# ''
+        return
+    endif
+    if l:mode == 1
+        call todo#RepeatTask(l:answer)
+    else
+        call todo#ShowTaskLater(l:answer)
+    endif
+endfunction
 
 " General date calculation functions {{{1
 
@@ -918,6 +1405,7 @@ function! todo#ApplyHighlight() abort
                 \ 'Done': ['TodoDone'],
                 \ 'Inbox': ['TodoInbox'],
                 \ 'Other': s:OtherPriorityGroups(),
+                \ 'Periodic': ['TodoPeriodic'],
                 \ }
     " Identifier is the default foreground in github_light, so (B) would match
     " inbox text. Function is a separate hue there (and in most schemes).
@@ -930,6 +1418,7 @@ function! todo#ApplyHighlight() abort
                 \ 'Other': 'Type',
                 \ 'Inbox': 'Underlined',
                 \ 'Done': 'Comment',
+                \ 'Periodic': 'Comment',
                 \ 'Active': {
                 \   'guifg': '#000000',
                 \   'guibg': '#D7FF00',
@@ -964,6 +1453,10 @@ function! s:OtherPriorityGroups() abort
     if !exists('s:todo_other_groups')
         let s:todo_other_groups = []
         for l:code in range(char2nr('C'), char2nr('Z'))
+            " P is the parked stub role, it is highlighted on its own.
+            if l:code == char2nr('P')
+                continue
+            endif
             call add(s:todo_other_groups, 'TodoPriority' . nr2char(l:code))
         endfor
     endif

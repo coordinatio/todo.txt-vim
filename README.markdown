@@ -23,13 +23,15 @@
 4. [Completion](#completion)
 5. [Hierarchical Sort](#hierarchical-sort)
 6. [Recurrence](#recurrence)
-7. [Mappings](#mappings)
+7. [Periodic and deferred tasks](#periodic-and-deferred-tasks)
+8. [Mappings](#mappings)
     1. [Sort](#sort)
     2. [Priorities](#priorities)
     3. [Dates](#dates)
     4. [Done](#done)
     5. [In progress](#in-progress)
-8. [Highlighting](#highlighting)
+    6. [Repeat and defer](#repeat-and-defer)
+9. [Highlighting](#highlighting)
 
 ## Release notes
 
@@ -241,6 +243,66 @@ Examples:
 
 This is a non-standard but widely adopted keyword.
 
+`rec:` copies the task as soon as you complete it. The `(P)` stubs below are a
+different mechanism: they wait for their own moment.
+
+## Periodic and deferred tasks
+
+In this fork `(P)` is not a priority. A `(P)` line is a *stub*, parked at the
+end of the active tasks, just before the `x ` block. You never do a stub: it
+only says when the task has to come back into the `(B)` next actions list.
+
+    (P) Pay the internet +home every:1m last:2026-09-01 rid:a1b2
+    (P) Book a dentist appointment +health show:2026-10-14
+
+The first one repeats, the second one is lifted once and then disappears. A
+repeating stub has exactly one open instance among the ordinary tasks:
+
+    (B) Pay the internet +home rid:a1b2
+
++ `every:` is the period of a repeating stub: `Nd`, `Nw`, `Nm` or `Ny`, the
+  same units as the existing date arithmetic.
++ `last:` is the completion date of the latest instance. It is absent until the
+  first instance is closed, and while it is missing no new instance is created.
++ `rid:` links an instance to its stub.
++ `show:` is the absolute date a one-shot stub is lifted on. The dialog accepts
+  an interval counted from today (`2w`) or a date (`2026-10-14`).
+
+The tags are deliberately not called `rec:`, so the existing behavior of
+`rec:` on `<LocalLeader>x` and `<LocalLeader>p` is unchanged.
+
+`<LocalLeader>r` asks two questions: repeat after every completion, or show
+once later; then the interval, or the date for the one-shot case.
+
++ Repeat: the current line stays the open instance and gains `rid:`, and a
+  `(P)` stub is appended at the end. On a line that already belongs to a
+  series, or on its stub, the dialog only changes `every:`.
++ One shot: the current line leaves the working list, rewritten as `(P)` with
+  `show:` and moved to the end.
+
+An empty answer cancels. Completed and empty lines are left alone. Repeat mode
+is refused on a one-shot `(P)` line, one-shot mode on a line that already
+belongs to a series.
+
+Nothing happens when the file is opened. The check runs on `<LocalLeader>x`,
+which never marks a `(P)` line done and never lets it reach `done.txt`. It
+stamps `last:` with today on the stub of the line being closed, then scans the
+stubs. A stub whose moment has come gives one task: the stub text without
+`every:`/`last:`/`show:`/`(P)`, with priority `(B)`, the same `rid:` and today
+as creation date, projects and contexts kept. It is placed at the start of the
+`(B)` list: before the first `(B)` task, after the last `(A)` when there is no
+`(B)`, otherwise at the top of the file. A due `show:` stub becomes that same
+`(B)` task and disappears.
+
+A second open instance is never created while one with the same `rid:` is
+unfinished, and an overdue period does not pile up: the next countdown starts
+from the actual completion. Stubs due at once are inserted as one block, in
+their own order. `<LocalLeader>X` scans once after the whole batch. The cursor
+stays on the line you just closed.
+
+Sorting parks the `(P)` lines at the tail of the active tasks, and
+`<LocalLeader>j` / `<LocalLeader>k` do nothing on a stub.
+
 ## Mappings
 
 By default todo-txt.vim sets all the mappings described in this section. To
@@ -285,6 +347,9 @@ Possible values are :
 + `<LocalLeader>a` : Add the priority (A) to the current line
 + `<LocalLeader>b` : Add the priority (B) to the current line
 + `<LocalLeader>c` : Add the priority (C) to the current line
+
+`<LocalLeader>j` and `<LocalLeader>k` do nothing on a `(P)` line: a stub is not
+a priority, and cycling the letter would turn the marker into `(O)` or `(Q)`.
 
 ### Dates
 
@@ -333,6 +398,11 @@ disable this behavior by setting the following global variable:
 
     let g:TodoTxtStripDoneItemPriority=1
 
+A `(P)` line is never marked done, neither by `<LocalLeader>x` nor by
+`<LocalLeader>X`, and never reaches the done file. Completing a task is what
+triggers the periodic check instead, see
+[Periodic and deferred tasks](#periodic-and-deferred-tasks).
+
 ### In progress
 
 + `<LocalLeader>w` : Toggle the `active:1` tag on the current line
@@ -341,6 +411,15 @@ The tag is todo.txt `key:value` metadata for work happening now. Several lines
 may carry it at once, and it does not change the line's priority. A completed
 line is left unchanged. Marking a line done removes the tag; toggling it back
 to undone does not restore the tag.
+
+### Repeat and defer
+
++ `<LocalLeader>r` : Repeat the current task after every completion, or park it
+  as a one-shot `(P)` line shown again later
+
+The dialog asks for the mode, then for the interval (`2w`, `10d`, `1m`, `1y`)
+or, for the one-shot case, a date. An empty answer cancels. See
+[Periodic and deferred tasks](#periodic-and-deferred-tasks).
 
 ### Format
 
@@ -352,14 +431,15 @@ Lines are colored by role, using highlight groups from the active colorscheme:
 
 + `(A)` is the watch list: work already started that you keep an eye on. Only the `(A)` mark uses `Todo` (the bright flag). The rest of the line uses `Constant`.
 + `(B)` is the list of next actions, drawn with `Function`.
-+ `(C)`–`(Z)` are formulated tasks outside those two lists, drawn with `Type`.
++ `(C)`–`(Z)` are formulated tasks outside those two lists, drawn with `Type`. `P` is not one of them.
++ `(P)` is a periodic stub, not a priority. The whole line is dim, drawn with `Comment` (`TodoPeriodic`), so it does not look like a task you could do. `active:1` and completed lines still take precedence.
 + A line with no priority is an inbox item: not a task yet. It uses `Underlined` and italics.
 + A completed line (`x ...`) uses `Comment` for the whole line, so projects, contexts and dates fade with it.
 + A line with `active:1` is in progress, on top of its existing role. The whole line is black text on a lime-yellow background (`TodoActive`). A completed line stays `Comment` even if the tag is still there.
 
 Priorities are recognized after an optional creation date (`2017-09-01 (A) ...`).
 
-Override colors with `g:Todo_txt_highlight`. A value is a highlight group name or a dictionary of attributes (`guifg`, `guibg`, `ctermfg`, `ctermbg`, `gui`, `cterm`). Keys you omit keep the default. `InboxItalic` (default 1) adds italics on top of the inbox color.
+Override colors with `g:Todo_txt_highlight`. A value is a highlight group name or a dictionary of attributes (`guifg`, `guibg`, `ctermfg`, `ctermbg`, `gui`, `cterm`). Keys you omit keep the default. `InboxItalic` (default 1) adds italics on top of the inbox color. The `Periodic` key (default `Comment`) sets the color of `(P)` stubs.
 
 ```vim
 let g:Todo_txt_highlight = {
