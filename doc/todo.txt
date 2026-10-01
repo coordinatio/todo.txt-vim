@@ -342,6 +342,14 @@ after the last `(A)` when there is no `(B)` task, or at the top of the file
 otherwise. A one-shot stub whose `show:` date has come becomes that same `(B)`
 task, at the same place, and the stub disappears.
 
+A repeating stub rolls its `due:` forward by `every:` until the date is no
+longer before today, so a materialized instance is never born overdue. If the
+`due:` is more than a few thousand periods stale, it is dropped instead of
+kept: a date that far behind carries no meaning, and keeping it would
+reintroduce exactly the staleness the rolling removes. A one-shot stub has no
+period to roll by and keeps the `due:` as written, even a past one — both
+dates were set knowingly, and seeing that the task is overdue is useful.
+
 Two rules keep a series from overflowing the list:
 
 + A second open instance is never created while a line with the same `rid:` is

@@ -127,6 +127,12 @@ function! todo#ToggleActive() abort
     if getline('.') =~# '\C^x\s'
         return
     endif
+    " A (P) stub is not a task: nothing is ever in progress on it, and the
+    " bright active:1 line would contradict the dim stub role. The rendering
+    " rule itself is untouched: a hand-edited stub with active:1 still wins.
+    if todo#IsStub(getline('.'))
+        return
+    endif
     let l:line = getline('.')
     if l:line =~# '\<active:1\>'
         call setline('.', s:WithoutActiveTag(l:line))
@@ -652,6 +658,9 @@ let s:date_re = '\v\C^\d{4}-\d{2}-\d{2}$'
 let s:period_re = '\v\C^\s*(\d+)\s*([dwmyDWMY])\s*$'
 " Two series created in the same second still need two different rids.
 let s:rid_counter = 0
+" Bound on the due: rolling loop of todo#MakeTask(). A normal series needs a
+" few steps; see s:RollDue() for what the cap means.
+let s:due_roll_cap = 5000
 
 function! s:IsDone(line) abort
     return a:line =~# s:done_re
@@ -724,12 +733,43 @@ function! todo#MakeTask(stub, date) abort
     if s:ValidDate(a:date)
         let l:task .= ' ' . a:date
     endif
-    let l:body = s:StubBody(a:stub)
+    let l:body = s:RollDue(s:StubBody(a:stub), a:stub, a:date)
     if l:body !=# ''
         let l:task .= ' ' . l:body
     endif
     let l:rid = todo#TagValue(a:stub, 'rid')
     return l:rid ==# '' ? l:task : l:task . ' rid:' . l:rid
+endfunction
+
+" Roll the due: of a repeating stub forward by its every: period until it is
+" no longer before a:date: an instance must not be born overdue and stay so
+" forever, the way a due: copied verbatim from the stub would.
+" A one-shot stub has no period to roll by and keeps the due: the user wrote,
+" past or not: both dates were set knowingly, and seeing the task is overdue
+" is useful.
+" The loop is bounded by s:due_roll_cap, a few thousand periods. If the cap
+" is somehow reached the due: is dropped rather than emitted still overdue:
+" a date thousands of periods stale carries no meaning, and keeping it would
+" reintroduce exactly the bug this function fixes.
+function! s:RollDue(body, stub, date) abort
+    let l:due = todo#TagValue(a:stub, 'due')
+    if !s:ValidDate(l:due) || !s:ValidDate(a:date) || l:due >=# a:date
+        return a:body
+    endif
+    let l:period = todo#ParsePeriod(todo#TagValue(a:stub, 'every'))
+    if empty(l:period)
+        return a:body
+    endif
+    let l:next = l:due
+    for l:step in range(s:due_roll_cap)
+        let l:next = todo#DateStringAdd(l:next, l:period[0], l:period[1])
+        if l:next >=# a:date
+            return s:SetTag(a:body, 'due', l:next)
+        endif
+    endfor
+    " A removed tag takes a preceding space with it, like s:StubBody().
+    let l:body = substitute(a:body, '\v\C\s+<due:\S*', '', '')
+    return substitute(l:body, '\v\C^<due:\S*\s*', '', '')
 endfunction
 
 function! todo#ParsePeriod(period) abort
@@ -796,6 +836,10 @@ function! s:TaskInsertIndex(lines) abort
     return l:last_a >= 0 ? l:last_a + 1 : 0
 endfunction
 
+" Public helper and test seam for the documented insertion rule of
+" s:TaskInsertIndex(): before the first (B), else after the last (A), else
+" the top of the file. The plugin itself inserts through the index function;
+" this one exists to unit-test the rule, it is not dead code.
 function! todo#TaskInsertLine() abort
     return s:TaskInsertIndex(getline(1, '$')) + 1
 endfunction
@@ -827,19 +871,6 @@ function! todo#StubDue(stub, today) abort
         return 0
     endif
     return s:DateReached(todo#DateStringAdd(l:last, l:period[0], l:period[1]), a:today)
-endfunction
-
-function! todo#HasOpenInstance(rid) abort
-    if a:rid ==# ''
-        return 0
-    endif
-    for l:lnum in range(1, line('$'))
-        let l:line = getline(l:lnum)
-        if s:IsTask(l:line) && todo#TagValue(l:line, 'rid') ==# a:rid
-            return 1
-        endif
-    endfor
-    return 0
 endfunction
 
 function! todo#UpdateStubLast(rid, date) abort
@@ -934,6 +965,12 @@ function! todo#MaterializeStubs() abort
     endfor
     call s:SetBufferLines(l:kept)
     " Keep the cursor on the line it was on, the block above may have moved it.
+    " line('.') is still the old index into l:moved, and that is an invariant,
+    " not an oversight: materialization never shrinks the buffer, every
+    " dropped show: stub contributes exactly one task and repeat stubs are
+    " not dropped, so s:DeleteLines() is unreachable here and no deletion can
+    " shift the cursor before the mapping is read. Do not "fix" the
+    " old-index arithmetic below.
     call cursor(s:AnchorLine(l:moved, l:at, len(l:block), line('.') - 1) + 1, col('.'))
     return len(l:block)
 endfunction

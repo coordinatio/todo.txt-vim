@@ -294,6 +294,12 @@ as creation date, projects and contexts kept. It is placed at the start of the
 `(B)`, otherwise at the top of the file. A due `show:` stub becomes that same
 `(B)` task and disappears.
 
+A repeating stub rolls its `due:` forward by `every:` until the date is no
+longer in the past, so an instance is never born overdue; a `due:` more than a
+few thousand periods stale is dropped instead of kept. A one-shot stub has no
+period to roll by and keeps the `due:` as written, even a past one: both dates
+were set knowingly, and seeing that the task is overdue is useful.
+
 A second open instance is never created while one with the same `rid:` is
 unfinished, and an overdue period does not pile up: the next countdown starts
 from the actual completion. Stubs due at once are inserted as one block, in

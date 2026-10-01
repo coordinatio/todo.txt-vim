@@ -713,6 +713,27 @@ Expect todo (Same lines, done line still unchanged):
   x 2017-09-18 Done stays done active:1
   (B) Has inactive:1 in the text
 
+Given todo (A stub is not in progress):
+  (B) Pay the internet +home
+  (P) Pay the internet +home every:1m rid:a1b2
+Execute (ToggleActive leaves the stub alone):
+  " A stub is not a task: nothing is ever in progress on it, and the bright
+  " active:1 line would contradict the dim stub role. The syntax rule is a
+  " separate thing and untouched: a hand-edited stub with active:1 still
+  " highlights as TodoActive.
+  call cursor(2, 1)
+  call todo#ToggleActive()
+  AssertEqual '(P) Pay the internet +home every:1m rid:a1b2', getline(2)
+  " An ordinary task still toggles
+  call cursor(1, 1)
+  call todo#ToggleActive()
+  AssertEqual '(B) Pay the internet +home active:1', getline(1)
+Do (The mapping does not reach the stub either):
+  \wj\w
+Expect todo (The task toggled, the stub is byte-identical):
+  (B) Pay the internet +home active:1
+  (P) Pay the internet +home every:1m rid:a1b2
+
 Given todo (In progress to complete):
   (B) Next action active:1
   (A) 2017-09-01 Watch this active:1
@@ -1641,8 +1662,29 @@ Execute (An instance is the stub as a (B) task created today):
   " A one-shot stub has no rid:, so the instance has none either
   AssertEqual '(B) 2026-10-14 Book a dentist +health',
     \ todo#MakeTask('(P) Book a dentist +health show:2026-10-14', '2026-10-14')
+  " A due: that is already today or later is left alone
   AssertEqual '(B) 2026-09-30 Pay the internet +home @phone due:2026-10-05 rid:a1b2',
     \ todo#MakeTask('(P) Pay the internet +home @phone due:2026-10-05 every:1m rid:a1b2', '2026-09-30')
+  AssertEqual '(B) 2026-09-30 Pay the internet due:2026-09-30 rid:a1b2',
+    \ todo#MakeTask('(P) Pay the internet due:2026-09-30 every:1m rid:a1b2', '2026-09-30')
+Execute (A repeating stub rolls a past due: forward):
+  " 2021-03-05 plus 67 months is the first due date not before 2026-10-01:
+  " an instance is never born overdue, the way a verbatim copy would be
+  AssertEqual '(B) 2026-10-01 Water the flowers +garden due:2026-10-05 rid:b2c3',
+    \ todo#MakeTask('(P) Water the flowers +garden due:2021-03-05 every:1m rid:b2c3', '2026-10-01')
+  " The period, not the calendar, moves the date
+  AssertEqual '(B) 2026-10-01 Water the flowers due:2026-10-04 rid:b2c3',
+    \ todo#MakeTask('(P) Water the flowers due:2026-09-20 every:2w rid:b2c3', '2026-10-01')
+Execute (A one-shot stub keeps the due: the user wrote):
+  " No period to roll by: both dates were set knowingly, and seeing that the
+  " task is overdue is useful
+  AssertEqual '(B) 2026-10-14 Book a dentist +health due:2026-09-01',
+    \ todo#MakeTask('(P) Book a dentist +health due:2026-09-01 show:2026-10-14', '2026-10-14')
+Execute (An absurdly stale due: is dropped, not kept overdue):
+  " 2000-01-01 daily is past the rolling cap: a due: thousands of periods
+  " stale carries no meaning, and keeping it would undo the whole fix
+  AssertEqual '(B) 2026-10-01 Old chore rid:a1b2',
+    \ todo#MakeTask('(P) Old chore due:2000-01-01 every:1d rid:a1b2', '2026-10-01')
 
 " function todo#StubDue(stub, today) {{{2
 Before:
@@ -1715,7 +1757,6 @@ Given todo (A series whose period has passed):
 Execute (Exactly one instance comes back):
   AssertEqual 1, todo#MaterializeStubs()
   " The instance is open now, an overdue period does not pile up
-  AssertEqual 1, todo#HasOpenInstance('a1b2')
   AssertEqual 0, todo#MaterializeStubs()
   call ReplaceCurrentDates('')
 Expect todo (One new (B), at the start of the list):
@@ -1723,6 +1764,26 @@ Expect todo (One new (B), at the start of the list):
   (B) **TODAY** Pay the internet +home rid:a1b2
   (B) Other next action
   (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+  x 2026-09-01 Old done task
+
+Given todo (A due series whose due: is long past):
+  (A) Control the repair
+  (P) Water the flowers +garden due:2021-03-05 every:1m last:2026-08-01 rid:b2c3
+  x 2026-09-01 Old done task
+Execute (The instance rolls due: out of the past):
+  AssertEqual 1, todo#MaterializeStubs()
+  let b:due = todo#TagValue(getline(2), 'due')
+  " Rolled by every: to the first day-05 that is not before today, so the
+  " instance is never born overdue. The value depends on the run date, the
+  " two invariants do not.
+  Assert b:due >=# strftime('%Y-%m-%d')
+  AssertEqual '05', b:due[8:9]
+  silent! 2substitute/due:\S\+/due:ROLLED/
+  call ReplaceCurrentDates('')
+Expect todo (The stub keeps its own due:, the task got a live one):
+  (A) Control the repair
+  (B) **TODAY** Water the flowers +garden due:ROLLED rid:b2c3
+  (P) Water the flowers +garden due:2021-03-05 every:1m last:2026-08-01 rid:b2c3
   x 2026-09-01 Old done task
 
 Given todo (An open instance of a due series):
@@ -1733,7 +1794,6 @@ Given todo (An open instance of a due series):
   x 2026-09-01 Old done task
 Execute (Never a second open instance):
   AssertEqual 0, todo#MaterializeStubs()
-  AssertEqual 0, todo#HasOpenInstance('c3d4')
 Expect todo (Untouched):
   (A) Control the repair
   (B) Pay the internet +home rid:a1b2
@@ -1833,7 +1893,6 @@ Execute (One rid, one instance per pass):
   " Both stubs are due and the buffer is only rewritten at the end of the
   " scan, so the pass itself has to remember the rid it just spawned.
   AssertEqual 1, todo#MaterializeStubs()
-  AssertEqual 1, todo#HasOpenInstance('a1b2')
   AssertEqual 0, todo#MaterializeStubs()
   call ReplaceCurrentDates('')
 Expect todo (The first stub in buffer order wins):
@@ -2055,7 +2114,6 @@ Do (Close the instance):
   j\x
 Then (The cursor stays on the line just closed):
   AssertEqual 3, line('.')
-  AssertEqual 1, todo#HasOpenInstance('c3d4')
   call ReplaceCurrentDates('')
 Expect todo (The new task went above, the closed line followed):
   (A) Control the repair
