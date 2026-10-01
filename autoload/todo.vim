@@ -33,6 +33,7 @@ function! todo#PrioritizeIncrease()
     " A (P) stub is not a priority: raising it would turn the marker into (Q)
     " and the stub would stop being a stub.
     if todo#IsStub(getline('.'))
+        call s:StubRefused('a (P) stub is not a priority')
         return
     endif
     normal! 0f)h
@@ -41,6 +42,7 @@ endfunction
 function! todo#PrioritizeDecrease()
     " Same as todo#PrioritizeIncrease(): the marker must stay (P).
     if todo#IsStub(getline('.'))
+        call s:StubRefused('a (P) stub is not a priority')
         return
     endif
     normal! 0f)h
@@ -50,6 +52,7 @@ function! todo#PrioritizeAdd (priority)
     " Same as todo#PrioritizeIncrease(): a (P) stub is not a priority, and
     " prepending (A)-(C) would push the marker aside and destroy the stub.
     if todo#IsStub(getline('.'))
+        call s:StubRefused('a (P) stub is not a priority')
         return
     endif
     let oldpos=todo#GetCurpos()
@@ -131,6 +134,7 @@ function! todo#ToggleActive() abort
     " bright active:1 line would contradict the dim stub role. The rendering
     " rule itself is untouched: a hand-edited stub with active:1 still wins.
     if todo#IsStub(getline('.'))
+        call s:StubRefused('a (P) stub is never in progress')
         return
     endif
     let l:line = getline('.')
@@ -151,6 +155,7 @@ function! todo#MarkAsDone(status)
     " A (P) stub is not a task: it is never completed and never reaches
     " done.txt. Only its instances are.
     if todo#IsStub(l:line)
+        call s:StubRefused('a (P) stub is never completed, only its instances are')
         return
     endif
     " Before the recurrence copy, so the next occurrence is not still in progress.
@@ -160,10 +165,11 @@ function! todo#MarkAsDone(status)
     endif
     " Stamp last: before the line is closed: the period of a series is counted
     " from the actual completion, and the stub scan below must already see it.
-    " Accepted trade-off, do not reorder: when CreateNewRecurrence() below
-    " throws on a malformed rec:, last: stays stamped for a completion that
-    " never happened. That is garbage-in, and the stamp must still precede
-    " the marking so the scan sees the real completion date.
+    " Accepted trade-off, do not reorder: any failure below, a malformed rec:
+    " making CreateNewRecurrence() throw or a readonly buffer refusing the
+    " edits, leaves last: stamped for a completion that never happened. That
+    " is garbage-in, and the stamp must still precede the marking so the scan
+    " sees the real completion date.
     call todo#UpdateStubLast(todo#TagValue(l:stripped, 'rid'), strftime('%Y-%m-%d'))
     call todo#CreateNewRecurrence(1)
     if get(g:, 'TodoTxtStripDoneItemPriority', 0)
@@ -741,33 +747,53 @@ function! todo#MakeTask(stub, date) abort
     return l:rid ==# '' ? l:task : l:task . ' rid:' . l:rid
 endfunction
 
+" The due: a repeating stub emits next. [] when there is nothing to roll (no
+" due:, a malformed one, no period, or a date already reached), [''] when the
+" roll hit s:due_roll_cap and the due: is to be dropped, [date] with the date
+" rolled forward from the stub's own due:.
+" The loop is bounded by s:due_roll_cap, a few thousand periods. If the cap
+" is somehow reached the due: is dropped rather than emitted still overdue:
+" a date thousands of periods stale carries no meaning, and keeping it would
+" reintroduce exactly the bug the rolling fixes. The cap is a safety net, not
+" a path: todo#MaterializeStubs() writes every rolled date back onto the
+" stub, so a roll costs one or two steps, not the history of the series.
+function! s:RollDueDate(stub, date) abort
+    let l:due = todo#TagValue(a:stub, 'due')
+    if !s:ValidDate(l:due) || !s:ValidDate(a:date) || l:due >=# a:date
+        return []
+    endif
+    let l:period = todo#ParsePeriod(todo#TagValue(a:stub, 'every'))
+    if empty(l:period)
+        return []
+    endif
+    let l:next = l:due
+    let l:steps = 0
+    while l:steps < s:due_roll_cap
+        let l:next = todo#DateStringAdd(l:next, l:period[0], l:period[1])
+        if l:next >=# a:date
+            return [l:next]
+        endif
+        let l:steps += 1
+    endwhile
+    return ['']
+endfunction
+
 " Roll the due: of a repeating stub forward by its every: period until it is
 " no longer before a:date: an instance must not be born overdue and stay so
 " forever, the way a due: copied verbatim from the stub would.
 " A one-shot stub has no period to roll by and keeps the due: the user wrote,
 " past or not: both dates were set knowingly, and seeing the task is overdue
 " is useful.
-" The loop is bounded by s:due_roll_cap, a few thousand periods. If the cap
-" is somehow reached the due: is dropped rather than emitted still overdue:
-" a date thousands of periods stale carries no meaning, and keeping it would
-" reintroduce exactly the bug this function fixes.
 function! s:RollDue(body, stub, date) abort
-    let l:due = todo#TagValue(a:stub, 'due')
-    if !s:ValidDate(l:due) || !s:ValidDate(a:date) || l:due >=# a:date
+    let l:rolled = s:RollDueDate(a:stub, a:date)
+    if empty(l:rolled)
         return a:body
     endif
-    let l:period = todo#ParsePeriod(todo#TagValue(a:stub, 'every'))
-    if empty(l:period)
-        return a:body
+    if l:rolled[0] !=# ''
+        return s:SetTag(a:body, 'due', l:rolled[0])
     endif
-    let l:next = l:due
-    for l:step in range(s:due_roll_cap)
-        let l:next = todo#DateStringAdd(l:next, l:period[0], l:period[1])
-        if l:next >=# a:date
-            return s:SetTag(a:body, 'due', l:next)
-        endif
-    endfor
-    " A removed tag takes a preceding space with it, like s:StubBody().
+    " The cap was reached: a removed tag takes a preceding space with it,
+    " like s:StubBody().
     let l:body = substitute(a:body, '\v\C\s+<due:\S*', '', '')
     return substitute(l:body, '\v\C^<due:\S*\s*', '', '')
 endfunction
@@ -944,6 +970,21 @@ function! todo#MaterializeStubs() abort
                 continue
             endif
             let l:open[l:rid] = 1
+            " Write the rolled due: back onto the stub, in l:lines so the
+            " rebuild below picks it up without a second pass. Consequence,
+            " on purpose: the stub carries the date it just emitted, not the
+            " original one, so a reader sees the same due: on the stub and on
+            " its instance. That is what makes the next roll O(1), one period
+            " from the last emitted date, instead of replaying the history of
+            " the series and creeping toward s:due_roll_cap. MakeTask() below
+            " sees a due: already reached and copies it, rolling once in all.
+            " A dropped due: (cap reached) is not written back: the stub
+            " keeps what it had.
+            let l:rolled = s:RollDueDate(l:line, l:today)
+            if !empty(l:rolled) && l:rolled[0] !=# ''
+                let l:line = s:SetTag(l:line, 'due', l:rolled[0])
+                let l:lines[l:i] = l:line
+            endif
         endif
         " Stubs due at once go back as one block, in their own order.
         call add(l:block, todo#MakeTask(l:line, l:today))
@@ -1036,7 +1077,10 @@ function! todo#ShowTaskLater(when) abort
     if l:line !~# '\S' || s:IsDone(l:line)
         return 0
     endif
-    if todo#IsStub(l:line) || todo#TagValue(l:line, 'rid') !=# ''
+    if todo#IsStub(l:line)
+        return s:Error('a (P) stub is already parked, there is nothing left to defer')
+    endif
+    if todo#TagValue(l:line, 'rid') !=# ''
         return s:Error('this line already belongs to a repeat series')
     endif
     let l:stub = todo#MakeStub(l:line, ['show:' . l:date])
@@ -1066,6 +1110,16 @@ function! s:Error(message) abort
     echomsg 'Todo.txt: ' . a:message
     echohl None
     return 0
+endfunction
+
+" One refusal message for every action a (P) stub does not take, in the same
+" style as s:Error(). Suppressed while s:marking_all is set, so the :global
+" of todo#MarkAllAsDone() does not echo once per stub it walks over.
+function! s:StubRefused(reason) abort
+    if s:marking_all
+        return
+    endif
+    call s:Error(a:reason)
 endfunction
 
 " <LocalLeader>r. Thin on purpose: everything that can be tested lives in

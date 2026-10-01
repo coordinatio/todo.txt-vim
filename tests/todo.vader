@@ -1775,16 +1775,55 @@ Execute (The instance rolls due: out of the past):
   let b:due = todo#TagValue(getline(2), 'due')
   " Rolled by every: to the first day-05 that is not before today, so the
   " instance is never born overdue. The value depends on the run date, the
-  " two invariants do not.
+  " invariants do not.
   Assert b:due >=# strftime('%Y-%m-%d')
   AssertEqual '05', b:due[8:9]
-  silent! 2substitute/due:\S\+/due:ROLLED/
+  " The roll is written back: the stub carries the date it just emitted
+  AssertEqual b:due, todo#TagValue(getline(3), 'due')
+  silent! %substitute/due:\S\+/due:ROLLED/
   call ReplaceCurrentDates('')
-Expect todo (The stub keeps its own due:, the task got a live one):
+Expect todo (Stub and instance share the live due:):
   (A) Control the repair
   (B) **TODAY** Water the flowers +garden due:ROLLED rid:b2c3
-  (P) Water the flowers +garden due:2021-03-05 every:1m last:2026-08-01 rid:b2c3
+  (P) Water the flowers +garden due:ROLLED every:1m last:2026-08-01 rid:b2c3
   x 2026-09-01 Old done task
+
+Given todo (A series rolling through two spawns):
+  (A) Control the repair
+Execute (The next spawn rolls from the written-back due:, not the original):
+  let b:today = strftime('%Y-%m-%d')
+  let b:old = todo#DateStringAdd(b:today, -25, 'd')
+  let b:rolled = todo#DateStringAdd(b:old, 30, 'd')
+  call setline(2, '(P) Water the flowers +garden due:' . b:old . ' every:10d last:' . b:old . ' rid:b2c3')
+  " The first spawn rolls three periods and writes the result back onto the
+  " stub, in place: every:, last: and rid: stay where they were
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual b:rolled, todo#TagValue(getline(2), 'due')
+  AssertEqual '(P) Water the flowers +garden due:' . b:rolled . ' every:10d last:' . b:old . ' rid:b2c3', getline(3)
+  " Close the instance and date last: so the stub is due again
+  call setline(2, 'x ' . b:today . ' Water the flowers +garden due:' . b:rolled . ' rid:b2c3')
+  call setline(3, substitute(getline(3), '\vlast:\S*', 'last:' . b:old, ''))
+  " The second spawn takes the written-back due: as it stands: it is in the
+  " future, so there is nothing to roll, and the stub does not fall back to
+  " b:old the way a re-roll from the original date would
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual b:rolled, todo#TagValue(getline(2), 'due')
+  AssertEqual b:rolled, todo#TagValue(getline(4), 'due')
+  " The instance is open, nothing more comes out of the stub
+  AssertEqual 0, todo#MaterializeStubs()
+
+Given todo (A written-back due: that has passed again):
+  (A) Control the repair
+Execute (An expired written-back due: rolls exactly one more period):
+  let b:today = strftime('%Y-%m-%d')
+  let b:yesterday = todo#DateStringAdd(b:today, -1, 'd')
+  let b:once = todo#DateStringAdd(b:yesterday, 10, 'd')
+  " The stub carries what its last spawn emitted and that date has passed:
+  " the roll is one period from there, not a replay of the series' history
+  call setline(2, '(P) Water the flowers +garden due:' . b:yesterday . ' every:10d last:2026-08-01 rid:b2c3')
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual b:once, todo#TagValue(getline(2), 'due')
+  AssertEqual b:once, todo#TagValue(getline(3), 'due')
 
 Given todo (An open instance of a due series):
   (A) Control the repair
@@ -2040,6 +2079,16 @@ Execute (A completed line is left alone):
   AssertEqual 'x 2026-09-01 Old done task', getline(2)
   AssertEqual 2, line('$')
 
+Given todo (A one-shot stub under the cursor):
+  (P) Book a dentist +health show:2026-10-14
+Execute (Deferring a parked stub is refused with an accurate message):
+  " A show: stub is not a repeat series, the old shared message said the
+  " wrong thing about it
+  call cursor(1, 1)
+  Assert execute('call todo#ShowTaskLater("2w")') =~# 'Todo.txt: a (P) stub is already parked'
+  AssertEqual 0, todo#ShowTaskLater('2w')
+  AssertEqual '(P) Book a dentist +health show:2026-10-14', getline(1)
+
 " function todo#MarkAsDone(status) and the (P) stubs {{{2
 Before:
 After:
@@ -2092,6 +2141,26 @@ Execute (A stub is never completed):
 Expect todo (Nothing closed, nothing spawned):
   (B) Pay the internet +home rid:a1b2
   (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+
+Given todo (A stub refuses out loud):
+  (B) Pay the internet +home rid:a1b2
+  (P) Pay the internet +home every:1m last:2026-08-01 rid:a1b2
+Execute (Every refused action says so and changes nothing):
+  " Silence is indistinguishable from a broken keybinding, so each refusal
+  " names the stub on the command line
+  let b:before = getline(1, '$')
+  call cursor(2, 1)
+  Assert execute('call todo#MarkAsDone("")') =~# 'Todo.txt: a (P) stub is never completed'
+  Assert execute('call todo#PrioritizeIncrease()') =~# 'Todo.txt: a (P) stub is not a priority'
+  Assert execute('call todo#PrioritizeDecrease()') =~# 'Todo.txt: a (P) stub is not a priority'
+  Assert execute('call todo#PrioritizeAdd("A")') =~# 'Todo.txt: a (P) stub is not a priority'
+  Assert execute('call todo#ToggleActive()') =~# 'Todo.txt: a (P) stub is never in progress'
+  " The messages go to the command line, never to the buffer
+  AssertEqual b:before, getline(1, '$')
+Execute (A batch stays quiet about the stubs it walks over):
+  " One message per stub would bury the batch; s:marking_all suppresses them
+  call cursor(1, 1)
+  Assert execute('call todo#MarkAllAsDone()') !~# '(P) stub'
 
 Given todo (A stub under the mapping):
   (B) Pay the internet +home rid:a1b2

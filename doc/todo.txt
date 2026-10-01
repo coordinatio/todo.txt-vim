@@ -274,8 +274,10 @@ There are two kinds of stub:
 The first one repeats after every completion. The second one is lifted once, on
 the day written in `show:`, and then disappears.
 
-Opening a file materializes nothing. The check runs when a task is completed
-with `<LocalLeader>x`, see |TodoTxt-PeriodicDone|.
+Opening a file materializes nothing. The check runs whenever a task
+is completed: `<LocalLeader>x`, the `<LocalLeader>X` batch,
+the `<LocalLeader>C` cancel or any `todo#MarkAsDone()` call,
+see |TodoTxt-PeriodicDone|.
 
 7.1 Tags                                                 *TodoTxt-PeriodicTags*
 
@@ -322,7 +324,9 @@ a series.
 
 7.3 Completion                                          *TodoTxt-PeriodicDone*
 
-`<LocalLeader>x` runs the check, in this order:
+Any completion runs the check, in this order: `<LocalLeader>x`,
+the `<LocalLeader>X` batch, the `<LocalLeader>C` cancel
+and any `todo#MarkAsDone()` call take the same path.
 
 1. A `(P)` line is never marked done and never reaches `done.txt`.
 2. If the line being closed carries `rid:`, the matching stub gets `last:` set
@@ -342,13 +346,16 @@ after the last `(A)` when there is no `(B)` task, or at the top of the file
 otherwise. A one-shot stub whose `show:` date has come becomes that same `(B)`
 task, at the same place, and the stub disappears.
 
-A repeating stub rolls its `due:` forward by `every:` until the date is no
-longer before today, so a materialized instance is never born overdue. If the
-`due:` is more than a few thousand periods stale, it is dropped instead of
-kept: a date that far behind carries no meaning, and keeping it would
-reintroduce exactly the staleness the rolling removes. A one-shot stub has no
-period to roll by and keeps the `due:` as written, even a past one — both
-dates were set knowingly, and seeing that the task is overdue is useful.
+A repeating stub rolls its `due:` forward by `every:` until the date
+is no longer before today, so a materialized instance is never born overdue.
+If the `due:` is more than a few thousand periods stale, it is dropped
+instead of kept: a date that far behind carries no meaning, and keeping it
+would reintroduce exactly the staleness the rolling removes. The rolled
+date is written back onto the stub: the stub and its instance carry the same
+`due:`, and the next spawn rolls one period from there instead of replaying
+the history of the series. A one-shot stub has no period to roll by
+and keeps the `due:` as written, even a past one — both dates were set
+knowingly, and seeing that the task is overdue is useful.
 
 Two rules keep a series from overflowing the list:
 
@@ -363,10 +370,11 @@ once, after the whole batch. In every case the cursor stays on the line that
 was just closed.
 
 Cancelling an instance (`<LocalLeader>C`) stamps `last:` too: it goes through
-the same |todo#MarkAsDone()| path, and the series continues. This is
-deliberate. If cancelling did not stamp, cancelling the first instance of a
-series would leave its stub without `last:` at all, the period would have
-nothing to count from, and the series would die silently and permanently.
+the same `todo#MarkAsDone()` path, and the series continues.
+This is deliberate. If cancelling did not stamp, cancelling the first instance
+of a series would leave its stub without `last:` at all, the period
+would have nothing to count from, and the series would die silently
+and permanently.
 
 7.4 Periodic tasks and rec:                               *TodoTxt-PeriodicRec*
 

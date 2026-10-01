@@ -284,21 +284,26 @@ An empty answer cancels. Completed and empty lines are left alone. Repeat mode
 is refused on a one-shot `(P)` line, one-shot mode on a line that already
 belongs to a series.
 
-Nothing happens when the file is opened. The check runs on `<LocalLeader>x`,
-which never marks a `(P)` line done and never lets it reach `done.txt`. It
-stamps `last:` with today on the stub of the line being closed, then scans the
-stubs. A stub whose moment has come gives one task: the stub text without
-`every:`/`last:`/`show:`/`(P)`, with priority `(B)`, the same `rid:` and today
-as creation date, projects and contexts kept. It is placed at the start of the
-`(B)` list: before the first `(B)` task, after the last `(A)` when there is no
-`(B)`, otherwise at the top of the file. A due `show:` stub becomes that same
-`(B)` task and disappears.
+Nothing happens when the file is opened. The check runs whenever a task
+is completed, be it `<LocalLeader>x`, the `<LocalLeader>X` batch,
+the `<LocalLeader>C` cancel or a `todo#MarkAsDone()` call; it never marks
+a `(P)` line done and never lets one reach `done.txt`. It stamps `last:`
+with today on the stub of the line being closed, then scans the stubs.
+A stub whose moment has come gives one task: the stub text
+without `every:`/`last:`/`show:`/`(P)`, with priority `(B)`, the same `rid:`
+and today as creation date, projects and contexts kept. It is placed
+at the start of the `(B)` list: before the first `(B)` task,
+after the last `(A)` when there is no `(B)`, otherwise at the top
+of the file. A due `show:` stub becomes that same `(B)` task and disappears.
 
-A repeating stub rolls its `due:` forward by `every:` until the date is no
-longer in the past, so an instance is never born overdue; a `due:` more than a
-few thousand periods stale is dropped instead of kept. A one-shot stub has no
-period to roll by and keeps the `due:` as written, even a past one: both dates
-were set knowingly, and seeing that the task is overdue is useful.
+A repeating stub rolls its `due:` forward by `every:` until the date
+is no longer in the past, so an instance is never born overdue; a `due:`
+more than a few thousand periods stale is dropped instead of kept.
+The rolled date is written back onto the stub, so the stub and its instance
+carry the same `due:`, and the next spawn rolls one period from there
+instead of replaying the history of the series. A one-shot stub
+has no period to roll by and keeps the `due:` as written, even a past one:
+both dates were set knowingly, and seeing that the task is overdue is useful.
 
 A second open instance is never created while one with the same `rid:` is
 unfinished, and an overdue period does not pile up: the next countdown starts
