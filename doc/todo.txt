@@ -295,6 +295,11 @@ see |TodoTxt-PeriodicDone|.
 Like every other role, a stub is recognized with or without a creation date in
 front of `(P)`.
 
+`<LocalLeader>p` and `<LocalLeader>P` work on stubs too: on a repeating
+stub they move the `due:` the roll uses as its baseline, which is
+meaningful; on a one-shot `show:` stub they edit a `due:` that has no
+effect on when the stub is lifted, since the lift date is `show:`.
+
 7.2 The dialog                                         *TodoTxt-PeriodicDialog*
 
     `<LocalLeader>r` : Repeat the current task, or show it once later

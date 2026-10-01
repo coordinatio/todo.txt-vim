@@ -72,6 +72,13 @@ function! todo#PrioritizeAddAction (priority)
 endfunction
 
 function! todo#RemovePriority()
+    " A (P) stub is not a priority: stripping the marker would leave an inbox
+    " note with orphaned every:/last:/show:/rid: tags. Nothing would ever
+    " spawn from it again, and the series would die silently.
+    if todo#IsStub(getline('.'))
+        call s:StubRefused('a (P) stub is not a priority')
+        return
+    endif
     :s/^(\w)\s\+//ge
 endfunction
 

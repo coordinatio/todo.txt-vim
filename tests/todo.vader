@@ -2382,6 +2382,20 @@ Expect todo (The stub keeps its marker, the note gained (B)):
   (P) Pay the internet +home every:1m rid:a1b2
   (B) A plain inbox note
 
+Given todo (A stub and a prioritized task):
+  (P) Pay the internet +home every:1m rid:a1b2
+  (B) A real next action
+Execute (Remove-priority leaves the stub alone):
+  " Stripping the (P) marker would leave an inbox note with orphaned
+  " every:/rid: tags: nothing would ever spawn again, and the series
+  " would die silently.
+  call todo#RemovePriority()
+  AssertEqual 1, todo#IsStub(getline(1))
+  call cursor(2, 1)
+  call todo#RemovePriority()
+Expect todo (The stub is untouched, the task lost its priority):
+  (P) Pay the internet +home every:1m rid:a1b2
+  A real next action
 
 " Mappings: <LocalLeader>r {{{3
 Before:

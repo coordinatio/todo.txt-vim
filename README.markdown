@@ -268,6 +268,11 @@ repeating stub has exactly one open instance among the ordinary tasks:
 + `show:` is the absolute date a one-shot stub is lifted on. The dialog accepts
   an interval counted from today (`2w`) or a date (`2026-10-14`).
 
+`<LocalLeader>p` and `<LocalLeader>P` work on stubs too: on a repeating stub
+they move the `due:` the roll uses as its baseline, which is meaningful; on a
+one-shot `show:` stub they edit a `due:` that has no effect on when the stub
+is lifted, since the lift date is `show:`.
+
 The tags are deliberately not called `rec:`, so the existing behavior of
 `rec:` on `<LocalLeader>x` and `<LocalLeader>p` is unchanged. The two
 mechanisms must not be combined on one line: a `rec:` copy retains the
