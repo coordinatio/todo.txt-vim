@@ -1629,6 +1629,13 @@ Execute (todo#ParsePeriod takes the units of the date arithmetic):
   AssertEqual [], todo#ParsePeriod('0d')
   AssertEqual [], todo#ParsePeriod('w')
   AssertEqual [], todo#ParsePeriod('1h')
+  " The cap rejects an absurd unit count along with the malformed ones:
+  " todo#DateAdd() loops unit by unit, so every:99999999d would freeze Vim
+  " on the next completion scan. See s:period_unit_cap for the arithmetic.
+  AssertEqual [1000, 'd'], todo#ParsePeriod('1000d')
+  AssertEqual [], todo#ParsePeriod('1001d')
+  AssertEqual [], todo#ParsePeriod('99999999d')
+  AssertEqual [], todo#ParsePeriod('99999999y')
 Execute (todo#IsStub knows the (P) role):
   Assert todo#IsStub('(P) Pay the internet +home every:1m rid:a1b2')
   Assert todo#IsStub('2026-09-01 (P) Book a dentist show:2026-10-14')
@@ -1710,6 +1717,12 @@ Execute (Only a (P) line with readable tags can be due):
   Assert !todo#StubDue('(P) Broken every:xx last:2026-09-01', '2026-10-14')
   Assert !todo#StubDue('(P) Broken every:1m last:2026-9-1', '2026-10-14')
   Assert !todo#StubDue('(P) Nothing to do', '2026-10-14')
+Execute (An absurd period is refused, not counted out):
+  " A hand-edited stub must not hang the scan: the period is rejected
+  " before todo#DateStringAdd() ever loops over its unit count, so the
+  " stub is simply never due, like any other unreadable tag
+  Assert !todo#StubDue('(P) Pay the internet every:99999999d last:2020-01-01 rid:a1b2', '2026-10-01')
+  Assert !todo#StubDue('(P) Pay the internet every:99999999y last:2020-01-01 rid:a1b2', '2026-10-01')
 
 " function todo#TaskInsertLine() {{{2
 Before:
@@ -1824,6 +1837,40 @@ Execute (An expired written-back due: rolls exactly one more period):
   AssertEqual 1, todo#MaterializeStubs()
   AssertEqual b:once, todo#TagValue(getline(2), 'due')
   AssertEqual b:once, todo#TagValue(getline(3), 'due')
+
+Given todo (A series far behind its due:):
+  (A) Control the repair
+Execute (A capped spawn advances the stub until the series converges):
+  let b:today = strftime('%Y-%m-%d')
+  let b:ancient = todo#DateStringAdd(b:today, -12000, 'd')
+  let b:yesterday = todo#DateStringAdd(b:today, -1, 'd')
+  call setline(2, '(P) Old chore due:' . b:ancient . ' every:1d last:2020-01-01 rid:a1b2')
+  " First capped spawn: the instance gets no due: at all, a date thousands
+  " of periods stale carries no meaning, and the stub advances by the roll
+  " cap instead of keeping the ancient date. The cap is written back, so
+  " the series converges instead of re-paying the full roll forever.
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual '', todo#TagValue(getline(2), 'due')
+  AssertEqual todo#DateStringAdd(b:ancient, 5000, 'd'), todo#TagValue(getline(3), 'due')
+  Assert todo#TagValue(getline(3), 'due') <# b:today
+  " Drop the open instance: the next capped spawn advances once more
+  2delete _
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual '', todo#TagValue(getline(2), 'due')
+  AssertEqual todo#DateStringAdd(b:ancient, 10000, 'd'), todo#TagValue(getline(3), 'due')
+  " The third roll is below the cap: it lands exactly on today, and the
+  " instance carries the due: again
+  2delete _
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual b:today, todo#TagValue(getline(2), 'due')
+  AssertEqual b:today, todo#TagValue(getline(3), 'due')
+  " Expire the written-back due: by a day: rolling is back to one period
+  " per spawn, no cap in sight
+  2delete _
+  call setline(3, substitute(getline(3), '\v<due:\S*', 'due:' . b:yesterday, ''))
+  AssertEqual 1, todo#MaterializeStubs()
+  AssertEqual todo#DateStringAdd(b:yesterday, 1, 'd'), todo#TagValue(getline(2), 'due')
+  AssertEqual todo#TagValue(getline(2), 'due'), todo#TagValue(getline(3), 'due')
 
 Given todo (An open instance of a due series):
   (A) Control the repair
@@ -2038,6 +2085,34 @@ Expect todo (The stub stays where it is):
   (B) Pay the internet +home rid:a1b2
   (P) Pay the internet +home every:1y last:2026-08-01 rid:a1b2
 
+Given todo (Lines that already repeat with rec:):
+  (B) Pay the internet +home rec:1w
+  (B) Water the flowers rec:+2w due:2026-10-05
+Execute (Repeat mode is refused on a rec: line):
+  " The rec: copy keeps the rid:, so it would be a permanently open
+  " instance and the stub could never spawn again: the series would
+  " silently degrade to rec: semantics
+  call cursor(1, 1)
+  Assert execute('call todo#RepeatTask("2w")') =~# 'Todo.txt: this line already repeats with rec:'
+  AssertEqual 0, todo#RepeatTask('2w')
+  " Strict rec: is refused the same way
+  call cursor(2, 1)
+  AssertEqual 0, todo#RepeatTask('2w')
+  AssertEqual 2, line('$')
+Expect todo (Both untouched, no stub anywhere):
+  (B) Pay the internet +home rec:1w
+  (B) Water the flowers rec:+2w due:2026-10-05
+
+Given todo (A rec: line to defer):
+  (B) Pay the internet +home rec:1w
+Execute (Deferring a rec: line stays allowed):
+  " A one-shot stub keeps rec: and the lifted task then behaves the way
+  " rec: always did, which is coherent, so no refusal here
+  call cursor(1, 1)
+  AssertEqual 1, todo#ShowTaskLater('2026-10-14')
+Expect todo (The stub carries rec: and show:):
+  (P) Pay the internet +home rec:1w show:2026-10-14
+
 Given todo (A task to pick up later):
   (A) Control the repair
   Book a dentist +health
@@ -2062,6 +2137,29 @@ Execute (A calendar date is taken as it is):
 Expect todo (Parked with that date):
   (P) Book a dentist +health show:2026-10-14
 
+Given todo (A task to defer):
+  Book a dentist +health
+Execute (A day that does not exist parks nothing):
+  " The dialog must not create a task that is lost forever: show:2026-99-99
+  " passes the shape check of s:ValidDate(), but that day never comes, so
+  " the stub could never be due
+  call cursor(1, 1)
+  Assert execute('call todo#ShowTaskLater("2026-99-99")') =~# 'Todo.txt: invalid date'
+  AssertEqual 0, todo#ShowTaskLater('2026-99-99')
+  AssertEqual 0, todo#ShowTaskLater('2026-02-30')
+  AssertEqual 0, todo#ShowTaskLater('2026-00-10')
+  AssertEqual 0, todo#ShowTaskLater('2026-10-00')
+  AssertEqual 0, todo#ShowTaskLater('2026-13-01')
+  AssertEqual 'Book a dentist +health', getline(1)
+  AssertEqual 1, line('$')
+Execute (Leap days are known):
+  " 2026 is no leap year, 2028 is one
+  call cursor(1, 1)
+  AssertEqual 0, todo#ShowTaskLater('2026-02-29')
+  AssertEqual 1, todo#ShowTaskLater('2028-02-29')
+Expect todo (Parked with the real leap day):
+  (P) Book a dentist +health show:2028-02-29
+
 Given todo (Tasks that stay as they are):
   (B) Pay the internet +home
   x 2026-09-01 Old done task
@@ -2070,6 +2168,14 @@ Execute (An unreadable answer changes nothing):
   AssertEqual 0, todo#RepeatTask('')
   AssertEqual 0, todo#RepeatTask('1h')
   AssertEqual 0, todo#ShowTaskLater('soon')
+  AssertEqual '(B) Pay the internet +home', getline(1)
+  AssertEqual 2, line('$')
+Execute (An absurd period is refused with a message, not silently):
+  " A rejected period with no message would look like a broken keybinding
+  Assert execute('call todo#RepeatTask("99999999d")') =~# 'Todo.txt: invalid period'
+  AssertEqual 0, todo#RepeatTask('99999999d')
+  Assert execute('call todo#ShowTaskLater("99999999w")') =~# 'Todo.txt: invalid date'
+  AssertEqual 0, todo#ShowTaskLater('99999999w')
   AssertEqual '(B) Pay the internet +home', getline(1)
   AssertEqual 2, line('$')
 Execute (A completed line is left alone):

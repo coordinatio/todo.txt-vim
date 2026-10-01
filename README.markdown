@@ -269,7 +269,11 @@ repeating stub has exactly one open instance among the ordinary tasks:
   an interval counted from today (`2w`) or a date (`2026-10-14`).
 
 The tags are deliberately not called `rec:`, so the existing behavior of
-`rec:` on `<LocalLeader>x` and `<LocalLeader>p` is unchanged.
+`rec:` on `<LocalLeader>x` and `<LocalLeader>p` is unchanged. The two
+mechanisms must not be combined on one line: a `rec:` copy retains the
+`rid:`, so it is a permanently open instance and the stub could never spawn
+again. Repeat mode is therefore refused on a `rec:` line. Deferring one is
+allowed: the lifted task then behaves the way `rec:` always did.
 
 `<LocalLeader>r` asks two questions: repeat after every completion, or show
 once later; then the interval, or the date for the one-shot case.
@@ -281,8 +285,9 @@ once later; then the interval, or the date for the one-shot case.
   `show:` and moved to the end.
 
 An empty answer cancels. Completed and empty lines are left alone. Repeat mode
-is refused on a one-shot `(P)` line, one-shot mode on a line that already
-belongs to a series.
+is refused on a one-shot `(P)` line and on a `rec:` line, one-shot mode on a
+line that already belongs to a series. A date is refused unless it is a real
+calendar day: `2026-99-99` would park a stub that can never come due.
 
 Nothing happens when the file is opened. The check runs whenever a task
 is completed, be it `<LocalLeader>x`, the `<LocalLeader>X` batch,
@@ -301,7 +306,10 @@ is no longer in the past, so an instance is never born overdue; a `due:`
 more than a few thousand periods stale is dropped instead of kept.
 The rolled date is written back onto the stub, so the stub and its instance
 carry the same `due:`, and the next spawn rolls one period from there
-instead of replaying the history of the series. A one-shot stub
+instead of replaying the history of the series. A capped roll writes the
+partially rolled date back: every capped spawn advances the stub by the cap,
+so a stale series converges over a few spawns instead of re-paying the full
+roll forever. A one-shot stub
 has no period to roll by and keeps the `due:` as written, even a past one:
 both dates were set knowingly, and seeing that the task is overdue is useful.
 

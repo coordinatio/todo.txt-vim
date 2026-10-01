@@ -320,7 +320,9 @@ Two steps: the mode, then the interval or the date.
 An empty answer cancels and leaves the file alone. Completed lines and empty
 lines are not modified. Repeat mode is refused on a one-shot `(P)` line: it has
 no period to change. One-shot mode is refused on a line that already belongs to
-a series.
+a series. Repeat mode is also refused on a line carrying `rec:`, see
+|TodoTxt-PeriodicRec|. A date is refused unless it is a real calendar day:
+`2026-99-99` would park a stub that can never come due.
 
 7.3 Completion                                          *TodoTxt-PeriodicDone*
 
@@ -353,7 +355,10 @@ instead of kept: a date that far behind carries no meaning, and keeping it
 would reintroduce exactly the staleness the rolling removes. The rolled
 date is written back onto the stub: the stub and its instance carry the same
 `due:`, and the next spawn rolls one period from there instead of replaying
-the history of the series. A one-shot stub has no period to roll by
+the history of the series. A capped roll writes the partially rolled date
+back: every capped spawn advances the stub by the cap, so a stale series
+converges on today over a few spawns instead of re-paying the full roll on
+every completion forever. A one-shot stub has no period to roll by
 and keeps the `due:` as written, even a past one — both dates were set
 knowingly, and seeing that the task is overdue is useful.
 
@@ -383,6 +388,13 @@ copies the line right away, on `<LocalLeader>x` and on `<LocalLeader>p`, which
 is not what a stub does: it waits, and leaves the copying to the completion
 check. Keeping the names apart leaves the old behavior of `rec:` untouched, and
 a `(P)` line is never duplicated by it.
+
+The two mechanisms must not be combined on one line: a `rec:` copy retains the
+`rid:` of the series, so it is a permanently open instance and the stub could
+never spawn again. The series would silently degrade to `rec:` semantics.
+`todo#RepeatTask()` therefore refuses a line carrying `rec:`. Deferring a
+`rec:` line with `show:` is allowed: the one-shot stub keeps `rec:`, and the
+lifted task then behaves the way `rec:` always did.
 
 ===============================================================================
 8. Mappings                                                *TodoTxt-Mappings* ~

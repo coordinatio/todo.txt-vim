@@ -667,6 +667,17 @@ let s:rid_counter = 0
 " Bound on the due: rolling loop of todo#MakeTask(). A normal series needs a
 " few steps; see s:RollDue() for what the cap means.
 let s:due_roll_cap = 5000
+" Bound on the unit count of a period. todo#DateAdd() loops unit by unit, so
+" an absurd count freezes Vim: every:99999999d hangs the next completion
+" scan. Worst-case arithmetic at the cap of 1000 units: one addition costs at
+" most 1000y = 12000 loop steps (y counts 12 months, w counts 7 days),
+" milliseconds. The rolling loop multiplies steps by per-step cost, but
+" reaching its s:due_roll_cap steps needs a due: more than 5000 periods
+" behind, and todo#DateAdd() clamps years below 1900, so the largest possible
+" gap is ~46000 days: only a period of ~9 days or less can hit the cap, at
+" most 5000*9 iterations, and a larger period needs fewer steps than its
+" per-step cost, at most ~46000*7 for weeks. Every path stays cheap.
+let s:period_unit_cap = 1000
 
 function! s:IsDone(line) abort
     return a:line =~# s:done_re
@@ -689,6 +700,22 @@ function! s:ValidDate(date) abort
     return a:date =~# s:date_re
 endfunction
 
+" A shape-valid date that is also a real calendar day: month 1-12 and a day
+" within todo#GetDaysInMonth(). Used where the dialog commits a new date to
+" file content; s:ValidDate() stays the cheap shape check on existing content.
+function! s:DateExists(date) abort
+    let l:parts = matchlist(a:date, '\v\C^(\d{4})-(\d{2})-(\d{2})$')
+    if empty(l:parts)
+        return 0
+    endif
+    let l:month = str2nr(l:parts[2])
+    if l:month < 1 || l:month > 12
+        return 0
+    endif
+    let l:day = str2nr(l:parts[3])
+    return l:day >= 1 && l:day <= todo#GetDaysInMonth(l:month, str2nr(l:parts[1]))
+endfunction
+
 function! todo#TagValue(line, tag) abort
     " Whole word, so "notevery:1m" is not an every: tag.
     return matchstr(a:line, '\v\C(^|\s)' . a:tag . ':\zs\S*')
@@ -708,6 +735,13 @@ function! s:SetTag(line, key, value) abort
         return substitute(a:line, '\v\C\s\zsrid:', l:tag . ' rid:', '')
     endif
     return a:line . ' ' . l:tag
+endfunction
+
+" Remove a tag from a line: a removed tag takes a preceding space with it,
+" like s:StubBody(), or the following space when it starts the line.
+function! s:StripTag(line, key) abort
+    let l:line = substitute(a:line, '\v\C\s+<' . a:key . ':\S*', '', '')
+    return substitute(l:line, '\v\C^<' . a:key . ':\S*\s*', '', '')
 endfunction
 
 function! s:StubBody(line) abort
@@ -747,35 +781,40 @@ function! todo#MakeTask(stub, date) abort
     return l:rid ==# '' ? l:task : l:task . ' rid:' . l:rid
 endfunction
 
-" The due: a repeating stub emits next. [] when there is nothing to roll (no
-" due:, a malformed one, no period, or a date already reached), [''] when the
-" roll hit s:due_roll_cap and the due: is to be dropped, [date] with the date
-" rolled forward from the stub's own due:.
-" The loop is bounded by s:due_roll_cap, a few thousand periods. If the cap
-" is somehow reached the due: is dropped rather than emitted still overdue:
-" a date thousands of periods stale carries no meaning, and keeping it would
-" reintroduce exactly the bug the rolling fixes. The cap is a safety net, not
-" a path: todo#MaterializeStubs() writes every rolled date back onto the
-" stub, so a roll costs one or two steps, not the history of the series.
+" The due: a repeating stub emits next, as a dict. {} when there is nothing
+" to roll (no due:, a malformed one, no period, or a date already reached);
+" otherwise {'task': ..., 'stub': ...}, where 'task' is the date for the
+" instance, '' meaning drop the due: entirely, and 'stub' is the date to
+" write back onto the stub. The two differ only when the roll hits
+" s:due_roll_cap.
+" The loop is bounded by s:due_roll_cap, a few thousand periods. A capped
+" roll emits no date: one thousands of periods stale carries no meaning, and
+" keeping it would reintroduce exactly the bug the rolling fixes. But the
+" partially rolled date is written back, so every capped spawn advances the
+" stub by the cap and the series converges on today, instead of keeping an
+" ancient due: and re-paying the full roll on every completion forever. The
+" cap is a safety net, not a path: todo#MaterializeStubs() writes every
+" rolled date back onto the stub, so a normal roll costs one or two steps,
+" not the history of the series.
 function! s:RollDueDate(stub, date) abort
     let l:due = todo#TagValue(a:stub, 'due')
     if !s:ValidDate(l:due) || !s:ValidDate(a:date) || l:due >=# a:date
-        return []
+        return {}
     endif
     let l:period = todo#ParsePeriod(todo#TagValue(a:stub, 'every'))
     if empty(l:period)
-        return []
+        return {}
     endif
     let l:next = l:due
     let l:steps = 0
     while l:steps < s:due_roll_cap
         let l:next = todo#DateStringAdd(l:next, l:period[0], l:period[1])
         if l:next >=# a:date
-            return [l:next]
+            return {'task': l:next, 'stub': l:next}
         endif
         let l:steps += 1
     endwhile
-    return ['']
+    return {'task': '', 'stub': l:next}
 endfunction
 
 " Roll the due: of a repeating stub forward by its every: period until it is
@@ -789,22 +828,28 @@ function! s:RollDue(body, stub, date) abort
     if empty(l:rolled)
         return a:body
     endif
-    if l:rolled[0] !=# ''
-        return s:SetTag(a:body, 'due', l:rolled[0])
+    if l:rolled.task !=# ''
+        return s:SetTag(a:body, 'due', l:rolled.task)
     endif
-    " The cap was reached: a removed tag takes a preceding space with it,
-    " like s:StubBody().
-    let l:body = substitute(a:body, '\v\C\s+<due:\S*', '', '')
-    return substitute(l:body, '\v\C^<due:\S*\s*', '', '')
+    " The cap was reached: the instance gets no due: at all.
+    return s:StripTag(a:body, 'due')
 endfunction
 
 function! todo#ParsePeriod(period) abort
     " Same units as the existing date arithmetic: Nd, Nw, Nm, Ny.
     let l:parts = matchlist(a:period, s:period_re)
-    if empty(l:parts) || str2nr(l:parts[1]) < 1
+    if empty(l:parts)
         return []
     endif
-    return [str2nr(l:parts[1]), tolower(l:parts[2])]
+    " The cap rejects the absurd alongside the malformed, see
+    " s:period_unit_cap: this is the single funnel for the dialog and for
+    " todo#StubDue(), so it covers both a typo at creation time and a
+    " hand-edited stub.
+    let l:count = str2nr(l:parts[1])
+    if l:count < 1 || l:count > s:period_unit_cap
+        return []
+    endif
+    return [l:count, tolower(l:parts[2])]
 endfunction
 
 function! s:RidTaken(rid) abort
@@ -978,12 +1023,20 @@ function! todo#MaterializeStubs() abort
             " from the last emitted date, instead of replaying the history of
             " the series and creeping toward s:due_roll_cap. MakeTask() below
             " sees a due: already reached and copies it, rolling once in all.
-            " A dropped due: (cap reached) is not written back: the stub
-            " keeps what it had.
+            " A capped roll is written back too, as the partially rolled date:
+            " each capped spawn advances the stub by the cap, so a stale
+            " series converges instead of re-paying the full roll forever.
+            " The instance then gets no due:, and the line handed to
+            " MakeTask() must not carry one either: it would roll the cap a
+            " second time, only to drop the date anyway.
             let l:rolled = s:RollDueDate(l:line, l:today)
-            if !empty(l:rolled) && l:rolled[0] !=# ''
-                let l:line = s:SetTag(l:line, 'due', l:rolled[0])
-                let l:lines[l:i] = l:line
+            if !empty(l:rolled)
+                let l:lines[l:i] = s:SetTag(l:line, 'due', l:rolled.stub)
+                if l:rolled.task !=# ''
+                    let l:line = s:SetTag(l:line, 'due', l:rolled.task)
+                else
+                    let l:line = s:StripTag(l:line, 'due')
+                endif
             endif
         endif
         " Stubs due at once go back as one block, in their own order.
@@ -1035,12 +1088,18 @@ endfunction
 function! todo#RepeatTask(period) abort
     let l:period = todo#ParsePeriod(a:period)
     if empty(l:period)
-        return s:Error('invalid period, expected something like 2w, 10d, 1m or 1y')
+        return s:Error('invalid period, expected something like 2w, 10d, 1m or 1y, at most ' . s:period_unit_cap . ' units')
     endif
     let l:lnum = line('.')
     let l:line = getline(l:lnum)
     if l:line !~# '\S' || s:IsDone(l:line)
         return 0
+    endif
+    " A rec: line must not become a repeat series: the rec: copy keeps the
+    " rid:, so it is a permanent open instance and the stub could never spawn
+    " again. The series would silently degrade to rec: semantics, so refuse.
+    if todo#TagValue(l:line, 'rec') !=# ''
+        return s:Error('this line already repeats with rec:, the two mechanisms must not be combined')
     endif
     let l:every = l:period[0] . l:period[1]
     if todo#IsStub(l:line)
@@ -1070,7 +1129,7 @@ endfunction
 function! todo#ShowTaskLater(when) abort
     let l:date = s:ParseWhen(a:when)
     if l:date ==# ''
-        return s:Error('invalid date, expected an interval like 2w or a date like 2026-10-14')
+        return s:Error('invalid date, expected an interval like 2w or a real date like 2026-10-14')
     endif
     let l:lnum = line('.')
     let l:line = getline(l:lnum)
@@ -1096,8 +1155,14 @@ endfunction
 
 function! s:ParseWhen(when) abort
     if s:ValidDate(a:when)
-        return a:when
+        " The shape check is not enough for a date the dialog commits to file
+        " content: show:2026-99-99 is never reached and the deferred task
+        " would be lost forever.
+        return s:DateExists(a:when) ? a:when : ''
     endif
+    " An interval needs no calendar check: it counts from today and
+    " todo#DateAdd() clamps the day to the month length, so it always lands
+    " on a real date.
     let l:period = todo#ParsePeriod(a:when)
     if empty(l:period)
         return ''
